@@ -1,14 +1,110 @@
 from elftools import *
 from elftools.elf.elffile import ELFFile
 
+ENUM_D_TAG_COMMON = dict(
+    DT_NULL=0,
+    DT_NEEDED=1,
+    DT_PLTRELSZ=2,
+    DT_PLTGOT=3,
+    DT_HASH=4,
+    DT_STRTAB=5,
+    DT_SYMTAB=6,
+    DT_RELA=7,
+    DT_RELASZ=8,
+    DT_RELAENT=9,
+    DT_STRSZ=10,
+    DT_SYMENT=11,
+    DT_INIT=12,
+    DT_FINI=13,
+    DT_SONAME=14,
+    DT_RPATH=15,
+    DT_SYMBOLIC=16,
+    DT_REL=17,
+    DT_RELSZ=18,
+    DT_RELENT=19,
+    DT_PLTREL=20,
+    DT_DEBUG=21,
+    DT_TEXTREL=22,
+    DT_JMPREL=23,
+    DT_BIND_NOW=24,
+    DT_INIT_ARRAY=25,
+    DT_FINI_ARRAY=26,
+    DT_INIT_ARRAYSZ=27,
+    DT_FINI_ARRAYSZ=28,
+    DT_RUNPATH=29,
+    DT_FLAGS=30,
+    DT_ENCODING=32,
+    DT_PREINIT_ARRAY=32,
+    DT_PREINIT_ARRAYSZ=33,
+    DT_SYMTAB_SHNDX=34,
+    DT_RELRSZ=35,
+    DT_RELR=36,
+    DT_RELRENT=37,
+    DT_NUM=38,
+    DT_LOOS=0x6000000d,
+    DT_ANDROID_REL=0x6000000f,
+    DT_ANDROID_RELSZ=0x60000010,
+    DT_ANDROID_RELA=0x60000011,
+    DT_ANDROID_RELASZ=0x60000012,
+    DT_ANDROID_RELR=0x6fffe000,
+    DT_ANDROID_RELRSZ=0x6fffe001,
+    DT_ANDROID_RELRENT=0x6fffe003,
+    DT_ANDROID_RELRCOUNT=0x6fffe005,
+    DT_HIOS=0x6ffff000,
+    DT_LOPROC=0x70000000,
+    DT_HIPROC=0x7fffffff,
+    DT_PROCNUM=0x35,
+    DT_VALRNGLO=0x6ffffd00,
+    DT_GNU_PRELINKED=0x6ffffdf5,
+    DT_GNU_CONFLICTSZ=0x6ffffdf6,
+    DT_GNU_LIBLISTSZ=0x6ffffdf7,
+    DT_CHECKSUM=0x6ffffdf8,
+    DT_PLTPADSZ=0x6ffffdf9,
+    DT_MOVEENT=0x6ffffdfa,
+    DT_MOVESZ=0x6ffffdfb,
+    DT_SYMINSZ=0x6ffffdfe,
+    DT_SYMINENT=0x6ffffdff,
+    DT_GNU_HASH=0x6ffffef5,
+    DT_TLSDESC_PLT=0x6ffffef6,
+    DT_TLSDESC_GOT=0x6ffffef7,
+    DT_GNU_CONFLICT=0x6ffffef8,
+    DT_GNU_LIBLIST=0x6ffffef9,
+    DT_CONFIG=0x6ffffefa,
+    DT_DEPAUDIT=0x6ffffefb,
+    DT_AUDIT=0x6ffffefc,
+    DT_PLTPAD=0x6ffffefd,
+    DT_MOVETAB=0x6ffffefe,
+    DT_SYMINFO=0x6ffffeff,
+    DT_VERSYM=0x6ffffff0,
+    DT_RELACOUNT=0x6ffffff9,
+    DT_RELCOUNT=0x6ffffffa,
+    DT_FLAGS_1=0x6ffffffb,
+    DT_VERDEF=0x6ffffffc,
+    DT_VERDEFNUM=0x6ffffffd,
+    DT_VERNEED=0x6ffffffe,
+    DT_VERNEEDNUM=0x6fffffff,
+    DT_AUXILIARY=0x7ffffffd,
+    DT_FILTER=0x7fffffff,
+    _default_=0xffffffff,
+)
+
 def modify_file(original_file,offset,data):
     original_file.seek(offset)
     original_file.write(data)
 
 def edit_dynamic_section(elf_object,original_file,size):
+    dynamic_section_offset = 0x2dd0
     dynamic_section = elf_object.get_section(23)
-    print(dynamic_section._get_tag(1)['d_ptr'])
-    print(dynamic_section.num_tags())
+    fini_value = dynamic_section._get_tag(1)['d_ptr']
+    #print(fini_value)
+    #print(dynamic_section.num_tags())
+    print()
+    for i in range(dynamic_section.num_tags()):
+        tag = dynamic_section._get_tag(i)
+        tag_value = tag['d_ptr']
+        if (ENUM_D_TAG_COMMON[tag['d_tag']] < 30 and tag['d_ptr'] < 0x1169):
+            print(tag['d_tag'],dynamic_section._get_tag(i)['d_ptr'])
+            modify_file(original_file,dynamic_section_offset + 16 * i + 8,(tag_value+size).to_bytes(8,'little'))
 
 def edit_program_header(elf_object,original_file,size):
     program_header_offset = elf_object['e_phoff']
@@ -58,10 +154,18 @@ def edit_symbol_table(elf_object,original_file,inject_offset,size):
     sym_2 = sym_tab.get_symbol(46)['st_value']
     sym_3 = sym_tab.get_symbol(51)['st_value']
     sym_4 = sym_tab.get_symbol(17)['st_value']
-    modify_file(original_file,sym_tab_offset + sym_size * 58 + value_offset,(sym_1+size).to_bytes(8,'little'))
-    modify_file(original_file,sym_tab_offset + sym_size * 46 + value_offset,(sym_2+size).to_bytes(8,'little'))
-    modify_file(original_file,sym_tab_offset + sym_size * 51 + value_offset,(sym_3+size).to_bytes(8,'little'))
-    modify_file(original_file,sym_tab_offset + sym_size * 17 + value_offset,(sym_4+size).to_bytes(8,'little'))
+    sym_5 = sym_tab.get_symbol(18)['st_value']
+    sym_6 = sym_tab.get_symbol(57)['st_value']
+    for i in range(num_symbols):
+        sym = sym_tab.get_symbol(i)['st_value']
+        if (sym > 0x1169):
+            modify_file(original_file,sym_tab_offset + sym_size * i + value_offset,(sym+size).to_bytes(8,'little'))
+    #modify_file(original_file,sym_tab_offset + sym_size * 58 + value_offset,(sym_1+size).to_bytes(8,'little'))
+    #modify_file(original_file,sym_tab_offset + sym_size * 46 + value_offset,(sym_2+size).to_bytes(8,'little'))
+    #modify_file(original_file,sym_tab_offset + sym_size * 51 + value_offset,(sym_3+size).to_bytes(8,'little'))
+    #modify_file(original_file,sym_tab_offset + sym_size * 17 + value_offset,(sym_4+size).to_bytes(8,'little'))
+    #modify_file(original_file,sym_tab_offset + sym_size * 18 + value_offset,(sym_5+size).to_bytes(8,'little'))
+    #modify_file(original_file,sym_tab_offset + sym_size * 57 + value_offset,(sym_6+size).to_bytes(8,'little'))
     print(sym_tab_offset)
     print(sym_1)
     print(sym_2)
