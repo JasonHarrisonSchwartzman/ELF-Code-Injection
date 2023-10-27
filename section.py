@@ -106,6 +106,7 @@ def edit_rela_dyn_section(elf_object,original_file,size):
     rela_dyn_section_offset = 0x548
     rela_dyn_relo_size = 24
     rela_dyn_num_relocations = rela_dyn_section.num_relocations()
+    rela_dyn_num_relocations = 3
     for i in range(rela_dyn_num_relocations):
         rela_dyn_offset = rela_dyn_section.get_relocation(i)['r_offset']
         modify_file(original_file,rela_dyn_section_offset + i * rela_dyn_relo_size,(rela_dyn_offset+size).to_bytes(8,'little'))
@@ -234,7 +235,7 @@ def edit_calls(elf_object,original_file,size):
     csu_init_offset = 0x109d
     modify_file(original_file,csu_init_offset,(0x2f).to_bytes(1,'little'))
     call_offset = 0x10aa
-    modify_file(original_file,call_offset,(0x42).to_bytes(1,'little'))
+    #modify_file(original_file,call_offset,(0x42).to_bytes(1,'little'))
     modify_file(original_file,0x11ed,(0xfdff).to_bytes(2,'little'))
     modify_file(original_file,0x1022,(0xa2).to_bytes(1,'little'))
     modify_file(original_file,0x1029,(0xa3).to_bytes(1,'little'))
@@ -242,9 +243,14 @@ def edit_calls(elf_object,original_file,size):
     modify_file(original_file,0x10ba,(0x62).to_bytes(1,'little'))
     modify_file(original_file,0x10e3,(0x39).to_bytes(1,'little'))
     modify_file(original_file,0x10ea,(0x32).to_bytes(1,'little'))
+    modify_file(original_file,0x1126,(0xf5).to_bytes(1,'little'))
+    modify_file(original_file,0x113e,(0xd6).to_bytes(1,'little'))
+    modify_file(original_file,0x114e,(0xcd).to_bytes(1,'little'))
+    #modify_file(original_file,0x100b,(0xe9).to_bytes(1,'little'))
 
 def edit_main(elf_object,original_file,size):
     modify_file(original_file,0x11a4,(0xc9).to_bytes(1,'little'))
+    modify_file(original_file,0x1186,(0x8a).to_bytes(1,'little'))
 size = 16
 f = open('hello','r+b')
 elf = ELFFile(open('hello','rb'))
