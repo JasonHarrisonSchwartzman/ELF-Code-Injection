@@ -228,14 +228,23 @@ def edit_elf_sections(elf_object,original_file,section,size):
     for i in range(elf_object.get_section_index(section)+1,elf_object.num_sections()):
         edit_elf_section(elf_object,original_file,elf_object.get_section(i),i,size)
 
-def edit_start(elf_object,original_file,size):
+def edit_calls(elf_object,original_file,size):
     csu_fini_offset = 0x1096
     modify_file(original_file,csu_fini_offset,(0xa6).to_bytes(1,'little'))
     csu_init_offset = 0x109d
     modify_file(original_file,csu_init_offset,(0x2f).to_bytes(1,'little'))
     call_offset = 0x10aa
-    #modify_file(original_file,call_offset,(0x42).to_bytes(1,'little'))
+    modify_file(original_file,call_offset,(0x42).to_bytes(1,'little'))
+    modify_file(original_file,0x11ed,(0xfdff).to_bytes(2,'little'))
+    modify_file(original_file,0x1022,(0xa2).to_bytes(1,'little'))
+    modify_file(original_file,0x1029,(0xa3).to_bytes(1,'little'))
+    modify_file(original_file,0x10b3,(0x69).to_bytes(1,'little'))
+    modify_file(original_file,0x10ba,(0x62).to_bytes(1,'little'))
+    modify_file(original_file,0x10e3,(0x39).to_bytes(1,'little'))
+    modify_file(original_file,0x10ea,(0x32).to_bytes(1,'little'))
 
+def edit_main(elf_object,original_file,size):
+    modify_file(original_file,0x11a4,(0xc9).to_bytes(1,'little'))
 size = 16
 f = open('hello','r+b')
 elf = ELFFile(open('hello','rb'))
@@ -245,7 +254,8 @@ edit_elf_sections( elf,f,'.text',size)
 edit_symbol_table(elf,f,0x1194,size)
 edit_program_header(elf,f,size)
 edit_dynamic_section(elf,f,size)
-#edit_rela_dyn_section(elf,f,size)
+edit_rela_dyn_section(elf,f,size)
 #edit_rela_plt_section(elf,f,size)
-edit_start(elf,f,size)
+edit_calls(elf,f,size)
+edit_main(elf,f,size)
 
