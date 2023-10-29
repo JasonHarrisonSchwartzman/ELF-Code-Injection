@@ -1,6 +1,10 @@
 from elftools import *
 from elftools.elf.elffile import ELFFile
 from elftools.elf.enums import ENUM_D_TAG_COMMON
+from capstone import Cs, CS_ARCH_X86, CS_MODE_64
+
+# Initialize the Capstone disassembler
+md = Cs(CS_ARCH_X86, CS_MODE_64)
 
 def modify_file(original_file,offset,data):
     original_file.seek(offset)
@@ -120,6 +124,26 @@ def edit_rela_dyn_section(elf_object,original_file,size):
         rela_dyn_offset = rela_dyn_section.get_relocation(i)['r_offset']
         modify_file(original_file,rela_dyn_section_offset + i * rela_dyn_relo_size,(rela_dyn_offset+size).to_bytes(8,'little'))
 
+def edit_code_section(elf_object,original_file,section_offset,section_size,inject_offset,size):
+    start = section_offset
+    end = section_offset + section_size
+
+    original_file.seek(start)  # Move the file pointer to the starting offset
+    code = original_file.read(end - start)
+
+    for insn in md.disasm(code, start):
+        #print(insn)
+        print("0x%x:\t%s\t%s" % (insn.address, insn.mnemonic, insn.op_str))
+
+def edit_text_section_calls(elf_object,original_file,inject_offset,size):
+    for i in range(elf_object.num_segments()):
+        if elf_object.get_segment(i)['p_flags'] & 0x1 == 1:
+            offset = elf_object.get_segment(i)['p_offset']
+            end = offset + elf_object.get_segment(i)['p_filesz']
+            for i in range(elf_object.num_sections()):
+                if elf_object.get_section(i)['sh_offset'] >= offset and elf_object.get_section(i)['sh_offset'] < end:
+                    edit_code_section(elf_object,original_file,elf_object.get_section(i)['sh_offset'],elf_object.get_section(i)['sh_size'],inject_offset,size)
+
 
 size = 16
 f = open('hello','r+b')
@@ -127,6 +151,8 @@ elf = ELFFile(open('hello','rb'))
 inject_offset = 0x1169
 
 modify_file(f,40,(elf['e_shoff']+16).to_bytes(8,'little'))
+
+edit_text_section_calls(elf,f,inject_offset,size)
 
 edit_text_section(elf,f,inject_offset,size)
 edit_elf_sections( elf,f,'.text',size)
