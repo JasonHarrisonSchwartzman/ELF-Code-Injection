@@ -2,6 +2,8 @@ from elftools import *
 from elftools.elf.elffile import ELFFile
 from elftools.elf.enums import ENUM_D_TAG_COMMON
 from capstone import Cs, CS_ARCH_X86, CS_MODE_64
+from iced_x86 import *
+import os
 
 # Initialize the Capstone disassembler
 md = Cs(CS_ARCH_X86, CS_MODE_64)
@@ -104,12 +106,12 @@ def edit_dynamic_section(elf_object,original_file,inject_offset,size):
     dynamic_section = elf_object.get_section_by_name(".dynamic")
     max_common_tag = 30
     value_offset = 8
-    print("dynamic section offset ",dynamic_section_offset)
+    #print("dynamic section offset ",dynamic_section_offset)
     for i in range(dynamic_section.num_tags()):
         tag = dynamic_section._get_tag(i)
         tag_value = tag['d_ptr']
         if (ENUM_D_TAG_COMMON[tag['d_tag']] < max_common_tag and tag_value > inject_offset):
-            print(tag['d_tag'],dynamic_section._get_tag(i)['d_ptr'])
+            #print(tag['d_tag'],dynamic_section._get_tag(i)['d_ptr'])
             modify_file(original_file,dynamic_section_offset + dynamic_section_entry_size * i + value_offset,(tag_value+size).to_bytes(8,'little'))
 
 def edit_rela_dyn_section(elf_object,original_file,size):
@@ -124,6 +126,23 @@ def edit_rela_dyn_section(elf_object,original_file,size):
         rela_dyn_offset = rela_dyn_section.get_relocation(i)['r_offset']
         modify_file(original_file,rela_dyn_section_offset + i * rela_dyn_relo_size,(rela_dyn_offset+size).to_bytes(8,'little'))
 
+def offset_in_rela(elf_object,offset):
+    rela_dyn_section = elf_object.get_section_by_name(".rela.dyn")
+    rela_dyn_num_relocations = rela_dyn_section.num_relocations()
+    relative_type = 8
+
+    rela_plt_section = elf_object.get_section_by_name(".rela.plt")
+    rela_plt_num_relocations = rela_plt_section.num_relocations()
+
+    for i in range(rela_dyn_num_relocations):
+        if offset == rela_dyn_section.get_relocation(i)['r_offset'] and rela_dyn_section.get_relocation(i)['r_info'] != relative_type:
+            return True
+    for i in range(rela_plt_num_relocations):
+        if offset == rela_plt_section.get_relocation(i)['r_offset']:
+            return True
+    return False
+
+
 def edit_code_section(elf_object,original_file,section_offset,section_size,inject_offset,size):
     start = section_offset
     end = section_offset + section_size
@@ -131,9 +150,17 @@ def edit_code_section(elf_object,original_file,section_offset,section_size,injec
     original_file.seek(start)  # Move the file pointer to the starting offset
     code = original_file.read(end - start)
 
-    for insn in md.disasm(code, start):
-        #print(insn)
-        print("0x%x:\t%s\t%s" % (insn.address, insn.mnemonic, insn.op_str))
+    decoder = Decoder(64, code, ip=start)
+    formatter = Formatter(FormatterSyntax.NASM)
+    for instr in decoder:
+        disasm = formatter.format(instr)
+        instruction_offset = instr.ip + instr.len - 4
+        next_ip = instr.ip + instr.len
+        rel_mem = instr.ip_rel_memory_address
+        if (rel_mem < start or rel_mem > end) and rel_mem < os.path.getsize(original_file.name) and rel_mem > inject_offset and not offset_in_rela(elf_object,rel_mem):
+            modify_file(original_file,instruction_offset,(rel_mem - next_ip + size).to_bytes(4,'little'))
+            print(hex(instruction_offset))
+            print(hex(instr.ip),"|",disasm,hex(rel_mem),"|",hex(next_ip),"|",rel_mem - instr.ip)
 
 def edit_text_section_calls(elf_object,original_file,inject_offset,size):
     for i in range(elf_object.num_segments()):
