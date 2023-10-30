@@ -149,20 +149,38 @@ def edit_code_section(elf_object,original_file,section_offset,section_size,injec
 
     original_file.seek(start)  # Move the file pointer to the starting offset
     code = original_file.read(end - start)
-
+    #print(code)
     decoder = Decoder(64, code, ip=start)
     formatter = Formatter(FormatterSyntax.NASM)
     for instr in decoder:
         disasm = formatter.format(instr)
-        instruction_offset = instr.ip + instr.len - 4
-        next_ip = instr.ip + instr.len
         rel_mem = instr.ip_rel_memory_address
-        if (rel_mem < start or rel_mem > end) and rel_mem < os.path.getsize(original_file.name) and rel_mem > inject_offset and not offset_in_rela(elf_object,rel_mem):
-            modify_file(original_file,instruction_offset,(rel_mem - next_ip + size).to_bytes(4,'little'))
-            print(hex(instruction_offset))
-            print(hex(instr.ip),"|",disasm,hex(rel_mem),"|",hex(next_ip),"|",rel_mem - instr.ip)
+        next_ip = instr.ip + instr.len
+
+        operand = rel_mem - next_ip
+        instruction_length = instr.len
+        start_index = instr.ip
+        end_index = start_index + instruction_length
+        instruction_bytes = code[start_index-start:end_index-start]
+        #if (rel_mem < inject_offset < instr.ip):
+        #    print(hex(instr.ip))
+        if ((instr.ip < inject_offset < rel_mem) or (rel_mem < inject_offset < instr.ip)) and rel_mem < os.path.getsize(original_file.name) and not offset_in_rela(elf_object,rel_mem):
+            #print(hex(instr.ip),hex(rel_mem),hex(operand))
+            if (instr.ip == 0x11ac):
+                print(hex(operand))
+            searching_bytes = operand.to_bytes(4, byteorder='little',signed=True)
+            #print(searching_bytes.hex())
+            hex_code = ' '.join(f'{byte:02X}' for byte in instruction_bytes)
+            hex_bytes = bytes.fromhex(hex_code)
+            try:
+                instruction_offset = instr.ip + hex_bytes.index(searching_bytes)
+            except:
+                continue
+            modify_file(original_file,instruction_offset,(rel_mem - next_ip + size if instr.ip < inject_offset < rel_mem else rel_mem - next_ip - size).to_bytes(4,'little',signed=True))
+            #print(hex(instr.ip),"|",disasm,hex(rel_mem),"|"," Next instruction: ",hex(next_ip),"|"," Operand ",hex(rel_mem - next_ip)," | Memory offset",hex(instruction_offset)," | Hex Code: ",hex_code)
 
 def edit_text_section_calls(elf_object,original_file,inject_offset,size):
+    modify_file(original_file,0x11a4,(0xc9).to_bytes(1,'little'))
     for i in range(elf_object.num_segments()):
         if elf_object.get_segment(i)['p_flags'] & 0x1 == 1:
             offset = elf_object.get_segment(i)['p_offset']
@@ -175,7 +193,7 @@ def edit_text_section_calls(elf_object,original_file,inject_offset,size):
 size = 16
 f = open('hello','r+b')
 elf = ELFFile(open('hello','rb'))
-inject_offset = 0x1169
+inject_offset = 0x1194
 
 modify_file(f,40,(elf['e_shoff']+16).to_bytes(8,'little'))
 
