@@ -149,7 +149,6 @@ def edit_code_section(elf_object,original_file,section_offset,section_size,injec
 
     original_file.seek(start)  # Move the file pointer to the starting offset
     code = original_file.read(end - start)
-    #print(code)
     decoder = Decoder(64, code, ip=start)
     formatter = Formatter(FormatterSyntax.NASM)
     for instr in decoder:
@@ -162,14 +161,10 @@ def edit_code_section(elf_object,original_file,section_offset,section_size,injec
         start_index = instr.ip
         end_index = start_index + instruction_length
         instruction_bytes = code[start_index-start:end_index-start]
-        #if (rel_mem < inject_offset < instr.ip):
-        #    print(hex(instr.ip))
         if ((instr.ip < inject_offset < rel_mem) or (rel_mem < inject_offset < instr.ip)) and rel_mem < os.path.getsize(original_file.name) and not offset_in_rela(elf_object,rel_mem):
-            #print(hex(instr.ip),hex(rel_mem),hex(operand))
             if (instr.ip == 0x11ac):
                 print(hex(operand))
             searching_bytes = operand.to_bytes(4, byteorder='little',signed=True)
-            #print(searching_bytes.hex())
             hex_code = ' '.join(f'{byte:02X}' for byte in instruction_bytes)
             hex_bytes = bytes.fromhex(hex_code)
             try:
