@@ -122,9 +122,9 @@ def edit_dynamic_section(elf_object,original_file,inject_offset,size):
     for i in range(dynamic_section.num_tags()):
         tag = dynamic_section._get_tag(i)
         tag_value = tag['d_ptr']
-        print(tag)
-        print(tag_value)
-        print(tag['d_tag'])
+        #print(tag)
+        #print(tag_value)
+        #print(tag['d_tag'])
         if (tag['d_tag'] == 'DT_NULL'):
             continue
         if (tag['d_tag'] < max_common_tag and ENUM_D_TAG_COMMON[tag['d_tag']] < max_common_tag and tag_value > inject_offset):
@@ -179,8 +179,6 @@ def edit_code_section(elf_object,original_file,section_offset,section_size,injec
         end_index = start_index + instruction_length
         instruction_bytes = code[start_index-start:end_index-start]
         if ((instr.ip < inject_offset < rel_mem) or (rel_mem < inject_offset < instr.ip)) and rel_mem < os.path.getsize(original_file.name) and not offset_in_rela(elf_object,rel_mem):
-            if (instr.ip == 0x11ac):
-                print(hex(operand))
             searching_bytes = operand.to_bytes(4, byteorder='little',signed=True)
             hex_code = ' '.join(f'{byte:02X}' for byte in instruction_bytes)
             hex_bytes = bytes.fromhex(hex_code)
