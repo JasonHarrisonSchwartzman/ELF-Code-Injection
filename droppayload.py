@@ -277,10 +277,10 @@ def insert_bytes_in_elf(elf_bytes, offset, bytes_to_insert):
     
     return bytes(elf_bytearray)
 
-sym_versions = [2,2,2,4,2,2,3,2,2,0]
-symbol_names = [  "memset", "close", "read", "memcpy","connect","socket", "__stack_chk_fail","write","strlen"]
-GLIBC_versions = ["GLIBC_2.14","GLIBC_2.4"]
-string_names = [ "memset", "close", "read", "memcpy","connect","socket", "__stack_chk_fail","write","strlen","GLIBC_2.14","GLIBC_2.4"]
+sym_versions = [2,2,2,2,2,3,2,2,0]
+symbol_names = [  "memset", "close", "read","connect","socket", "__stack_chk_fail","write","strlen"]
+GLIBC_versions = ["GLIBC_2.4"]
+string_names = [ "memset", "close", "read", "connect","socket", "__stack_chk_fail","write","strlen","GLIBC_2.4"]
 str_tab_entries = []
 
 def convert_functions_to_str_tab_entry():
@@ -288,8 +288,6 @@ def convert_functions_to_str_tab_entry():
     for symbol in string_names:
         for letter in symbol:
             str_tab_entries.append(ord(letter))
-        str_tab_entries.append(0x0)
-    while len(str_tab_entries) % 16 != 0:
         str_tab_entries.append(0x0)
 
 
@@ -414,20 +412,17 @@ def add_functions_to_rela_plt(elf_object,file,offset,size,rela_plt_alignment_siz
 def add_versions_to_gnu_version_r(elf_object,file,inject_offset,gnu_version_r_offset,dyn_str_inject_offset,size,gnu_version_r_alignment_size):
     #modify_file(file,gnu_version_r_offset,(gnu_version_r_section_size+size).to_bytes(8,'little'))
     verneed_size = 16
-    GLIBC_2_14_name = get_str_index_of_str(dyn_str_inject_offset,GLIBC_versions[0])
-    GLIBC_2_4_name = get_str_index_of_str(dyn_str_inject_offset,GLIBC_versions[1])
-    print("NAMES: ",GLIBC_2_14_name,GLIBC_2_4_name)
+    GLIBC_2_4_name = get_str_index_of_str(dyn_str_inject_offset,GLIBC_versions[0])
+    print("NAMES: ",GLIBC_2_4_name)
     name = 0x0
     flags = 0x0
     next = 0x10
     sizes = [4,2,2,4,4]
-    GLIBC_2_14 = [0x06969194,flags,0x4,GLIBC_2_14_name,next]
     GLIBC_2_4 =  [0x0d696914,flags,0x3,GLIBC_2_4_name,next]
 
-    assert sum(sizes) * 2 == size, "values not equal"
+    assert sum(sizes) == size, "values not equal"
         
-    add_contents_to_file(inject_offset,file,GLIBC_2_14,sizes)
-    add_contents_to_file(inject_offset+verneed_size,file,GLIBC_2_4,sizes)
+    add_contents_to_file(inject_offset,file,GLIBC_2_4,sizes)
     num_bytes_to_align = gnu_version_r_alignment_size - size
     if num_bytes_to_align > 0:
         align_section(file,inject_offset+verneed_size*2,num_bytes_to_align)
@@ -445,7 +440,7 @@ def edit_gnu_version_r_section(elf_object,original_file,inject_offset,size):
     gnu_version_r_section = elf_object.get_section_by_name(".gnu.version_r")
     num_versions = gnu_version_r_section.num_versions()
     print("Num versions", num_versions)
-    additional_versions = 2
+    additional_versions = 1
     cnt_offset = 2
 
     modify_file(original_file,gnu_version_r_offset+cnt_offset,(num_versions+additional_versions).to_bytes(2,'little'))
@@ -632,8 +627,16 @@ def align_offsets(elf_object,sections,sizes):
     for i in range(len(sections)):
         index = elf_object.get_section_index(sections[i])
         next_section_index = index + 1
-        next_section_align = elf_object.get_section(next_section_index)['sh_addralign']
-        aligned_sizes.append(sizes[i] + sizes[i] % next_section_align)
+        #xxx4 xxxx8
+        size = sizes[i]
+        section_offset = elf_object.get_section(next_section_index)['sh_offset']
+        length_to_next_section = size + elf_object.get_section_by_name(sections[i])['sh_offset']
+        print("Length to next section:",length_to_next_section % 16," | Next section_offset:",section_offset % 16)
+        while (length_to_next_section % 16) != (section_offset % 16):
+            length_to_next_section = length_to_next_section + 1
+            size = size + 1
+        #aligned_sizes.append(size)
+        aligned_sizes.append(sizes[i] + 16 - (sizes[i] % 16))
     return aligned_sizes
 
 ########
@@ -677,7 +680,7 @@ gnu_version_size = len(sym_versions) * 2
 section = elf.get_section_by_name(".gnu.version_r")
 gnu_version_r_header_size = 16
 gnu_version_r_inject_offset = section['sh_offset'] + gnu_version_r_header_size
-gnu_version_r_size = 32 #NEED TO CHANGE THIS
+gnu_version_r_size = 16 #NEED TO CHANGE THIS
 #.symtab
 section = elf.get_section_by_name(".symtab")
 if section is not None:
