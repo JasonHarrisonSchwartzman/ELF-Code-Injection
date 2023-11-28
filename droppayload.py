@@ -104,8 +104,8 @@ def edit_program_header(elf_object,original_file,inject_offsets,sizes):
         segment = elf_object.get_segment(i)
 
         seg_size = get_program_header_size_ammount(inject_offsets,segment['p_offset'],segment['p_filesz'],sizes)
-        if i == 2:
-            print("seg_size",hex(seg_size))
+        #if i == 2:
+        #    print("seg_size",hex(seg_size))
         modify_file(original_file,program_header_offset + i * header_size + filesz_offset,(segment['p_filesz']+seg_size).to_bytes(8,'little'))
         modify_file(original_file,program_header_offset + i * header_size + memsz_offset,(segment['p_memsz']+seg_size).to_bytes(8,'little'))
         #if segment['p_offset'] > inject_offset:
@@ -372,12 +372,12 @@ def add_functions_to_dyn_sym(elf_object,file,offset,size,dyn_str_inject_offset,d
     #offset = section['sh_offset'] + section['sh_size']
     sizes = [4,1,1,2,8,8]
     entry_size = 0x18
-    print("dyn_str_inject_offset")
-    print(len(symbol_names) * sum(sizes),size)
+    #print("dyn_str_inject_offset")
+    #print(len(symbol_names) * sum(sizes),size)
     assert len(symbol_names) * sum(sizes) == size, "values not equal"
     for i in range(len(symbol_names)):
         name = get_str_index_of_str(dyn_str_inject_offset,symbol_names[i])
-        print("Name:",hex(name))
+        #print("Name:",hex(name))
         #print(hex(offset))
         add_contents_to_file(offset,file,[name,0x12,0x0,0x0,0x0,0x0],sizes)
         offset+= entry_size
@@ -395,7 +395,7 @@ def add_functions_to_rela_plt(elf_object,file,offset,size,rela_plt_alignment_siz
     #for i in range(section.num_relocations()):
         #print(section.get_relocation(i))
     #offset = section['sh_offset'] + section['sh_size']
-    print("RELA PLT OFFSET:",hex(offset))
+    #print("RELA PLT OFFSET:",hex(offset))
     sizes = [8,8,8]
     assert sum(sizes) * len(symbol_names) == size, "values not equal"
     for i in range(len(symbol_names)):
@@ -403,7 +403,7 @@ def add_functions_to_rela_plt(elf_object,file,offset,size,rela_plt_alignment_siz
         info = index * 0x100000000 + 0x7
         rela_offset = 0x3cf8 # PLACEHOLDER FOR LATER
         add_contents_to_file(offset,file,[0,info,0x0],sizes)
-        print('added')
+        #print('added')
         offset+= section['sh_entsize']
     num_bytes_to_align = rela_plt_alignment_size - size
     if num_bytes_to_align > 0:
@@ -413,7 +413,7 @@ def add_versions_to_gnu_version_r(elf_object,file,inject_offset,gnu_version_r_of
     #modify_file(file,gnu_version_r_offset,(gnu_version_r_section_size+size).to_bytes(8,'little'))
     verneed_size = 16
     GLIBC_2_4_name = get_str_index_of_str(dyn_str_inject_offset,GLIBC_versions[0])
-    print("NAMES: ",GLIBC_2_4_name)
+    #print("NAMES: ",GLIBC_2_4_name)
     name = 0x0
     flags = 0x0
     next = 0x10
@@ -439,7 +439,7 @@ def edit_gnu_version_r_section(elf_object,original_file,inject_offset,size):
 
     gnu_version_r_section = elf_object.get_section_by_name(".gnu.version_r")
     num_versions = gnu_version_r_section.num_versions()
-    print("Num versions", num_versions)
+    #print("Num versions", num_versions)
     additional_versions = 1
     cnt_offset = 2
 
@@ -460,10 +460,18 @@ dyn_sym_symbol_names = []
 ## size of got = 8 * (num rela.dyn + num rela.plt)
 ## size of .plt = 16 * (num rela.plt) + 16
 
-def add_functions_to_got(elf_object,file,offset,size,plt_sec_inject_offset,got_alignment_size):
+def calculate_new_plt_sec_offset(plt_sec_inject_offset,elf_sections_changes,elf_sections_alignment_changes):
+    plt_sec_index = elf_sections_changes.index('.plt.sec')
+    for i in range(plt_sec_index+1,len(elf_sections_changes)):
+        plt_sec_inject_offset = plt_sec_inject_offset + elf_sections_alignment_changes[i]
+    return plt_sec_inject_offset
+
+def add_functions_to_got(elf_object,file,offset,size,plt_sec_inject_offset,got_alignment_size,elf_sections_changes,elf_sections_alignment_changes):
     sizes = [8]
     plt_sec_entry_size = 16
+    plt_sec_inject_offset = calculate_new_plt_sec_offset(plt_sec_inject_offset,elf_sections_changes,elf_sections_alignment_changes)
     assert sum(sizes) * len(symbol_names) == size, "values not equal"
+    print("adding functions to GOT starting at plt_sec_inject_offset:",hex(plt_sec_inject_offset))
     for i in range(len(symbol_names)):
         add_contents_to_file(offset,file,[plt_sec_inject_offset],sizes)
         plt_sec_inject_offset = plt_sec_inject_offset + plt_sec_entry_size
@@ -755,7 +763,7 @@ print("Num symbols to add ",len(symbol_names))
 #dyn_sym_offset = elf.get_section_by_name(".dynsym")['sh_offset'] + elf.get_section_by_name(".dynsym")['sh_size']
 
 add_functions_to_sym_tab(elf,f,sym_tab_size,sym_tab_alignment_size)
-add_functions_to_got(elf,f,got_inject_offset,got_size,plt_sec_inject_offset,got_alignment_size)
+add_functions_to_got(elf,f,got_inject_offset,got_size,plt_sec_inject_offset,got_alignment_size,elf_sections_changes,elf_sections_alignment_sizes)
 add_functions_to_plt_sec(elf,f,plt_sec_inject_offset,plt_sec_size,plt_sec_alignment_size)
 add_functions_to_plt(elf,f,plt_inject_offset,plt_size,plt_offset,plt_num_relocations,plt_alignment_size)
 add_functions_to_rela_plt(elf,f,rela_plt_inject_offset,rela_plt_size,rela_plt_alignment_size)
