@@ -300,22 +300,38 @@ def get_str_index_of_str(offset,str_name):
         index = index + len(string_names[i]) + 1
     return index
 
-def add_versions_to_gnu_version(elf_object,file,offset,size):
+def add_versions_to_gnu_version(elf_object,file,offset,size,gnu_version_alignment_size):
     sizes = []
     for i in sym_versions:
         sizes.append(2)
     assert sum(sizes) == size, "Values are not equal"
     add_contents_to_file(offset,file,sym_versions,sizes)
+    offset = offset + sum(sizes)
+    num_bytes_to_align = gnu_version_alignment_size - size
+    if num_bytes_to_align > 0:
+        align_section(file,offset,num_bytes_to_align)
 
 
-def add_strings_to_dyn_str_tab(elf_object,file,offset,size):
+def add_strings_to_dyn_str_tab(elf_object,file,offset,size,dyn_str_alignment_size):
     sizes = []
     for i in str_tab_entries:
         sizes.append(1)
     assert sum(sizes) == size, "Values are not equal"
     add_contents_to_file(offset,file,str_tab_entries,sizes)
+    offset = offset + sum(sizes)
+    num_bytes_to_align = dyn_str_alignment_size - size
+    if num_bytes_to_align > 0:
+        align_section(file,offset,num_bytes_to_align)
 
-def add_functions_to_sym_tab(elf_object,file,size):
+def align_section(file,offset,num_bytes):
+    sizes = []
+    bytes_to_add = []
+    for i in range(num_bytes):
+        sizes.append(1)
+        bytes_to_add.append(0x0)
+    add_contents_to_file(offset,file,bytes_to_add,sizes)
+
+def add_functions_to_sym_tab(elf_object,file,size,sym_tab_alignment_size):
     section = elf_object.get_section_by_name(".symtab")
     offset = section['sh_offset'] + section['sh_size']
     sizes = [4,1,1,2,8,8]
@@ -325,6 +341,9 @@ def add_functions_to_sym_tab(elf_object,file,size):
         #print(hex(offset))
         add_contents_to_file(offset,file,[name,0x12,0x0,0x0,0x0,0x0],sizes)
         offset+= section['sh_entsize']
+    num_bytes_to_align = sym_tab_alignment_size - size
+    if num_bytes_to_align > 0:
+        align_section(file,offset,num_bytes_to_align)
         
 
 def add_contents_to_file(offset,file,array_contents,array_sizes):
@@ -350,7 +369,7 @@ def check_duplicate_symbols(elf_object):
             string_names.remove(dyn_sym_tab.get_symbol(i).name)
     #print(i,sym_tab.get_symbol(i)['st_name'],sym_tab.get_symbol(i).name)
 
-def add_functions_to_dyn_sym(elf_object,file,offset,size,dyn_str_inject_offset):
+def add_functions_to_dyn_sym(elf_object,file,offset,size,dyn_str_inject_offset,dyn_sym_alignment_size):
     #section = elf_object.get_section_by_name(".dynsym")
     #offset = section['sh_offset'] + section['sh_size']
     sizes = [4,1,1,2,8,8]
@@ -364,13 +383,16 @@ def add_functions_to_dyn_sym(elf_object,file,offset,size,dyn_str_inject_offset):
         #print(hex(offset))
         add_contents_to_file(offset,file,[name,0x12,0x0,0x0,0x0,0x0],sizes)
         offset+= entry_size
+    num_bytes_to_align = dyn_sym_alignment_size - size
+    if num_bytes_to_align > 0:
+        align_section(file,offset,num_bytes_to_align)
 
 def get_index_of_symbol_in_dyn_sym(symbol_name):
     if symbol_name in dyn_sym_symbol_names:
         return dyn_sym_symbol_names.index(symbol_name)
     return len(dyn_sym_symbol_names) + symbol_names.index(symbol_name)
 
-def add_functions_to_rela_plt(elf_object,file,offset,size):
+def add_functions_to_rela_plt(elf_object,file,offset,size,rela_plt_alignment_size):
     section = elf_object.get_section_by_name(".rela.plt")
     #for i in range(section.num_relocations()):
         #print(section.get_relocation(i))
@@ -385,8 +407,11 @@ def add_functions_to_rela_plt(elf_object,file,offset,size):
         add_contents_to_file(offset,file,[0,info,0x0],sizes)
         print('added')
         offset+= section['sh_entsize']
+    num_bytes_to_align = rela_plt_alignment_size - size
+    if num_bytes_to_align > 0:
+        align_section(file,offset,num_bytes_to_align)
 
-def add_versions_to_gnu_version_r(elf_object,file,inject_offset,gnu_version_r_offset,dyn_str_inject_offset,size):
+def add_versions_to_gnu_version_r(elf_object,file,inject_offset,gnu_version_r_offset,dyn_str_inject_offset,size,gnu_version_r_alignment_size):
     #modify_file(file,gnu_version_r_offset,(gnu_version_r_section_size+size).to_bytes(8,'little'))
     verneed_size = 16
     GLIBC_2_14_name = get_str_index_of_str(dyn_str_inject_offset,GLIBC_versions[0])
@@ -403,6 +428,9 @@ def add_versions_to_gnu_version_r(elf_object,file,inject_offset,gnu_version_r_of
         
     add_contents_to_file(inject_offset,file,GLIBC_2_14,sizes)
     add_contents_to_file(inject_offset+verneed_size,file,GLIBC_2_4,sizes)
+    num_bytes_to_align = gnu_version_r_alignment_size - size
+    if num_bytes_to_align > 0:
+        align_section(file,inject_offset+verneed_size*2,num_bytes_to_align)
 
 def edit_gnu_version_r_section(elf_object,original_file,inject_offset,size):
     section_header_table = elf_object['e_shoff']
@@ -437,12 +465,24 @@ dyn_sym_symbol_names = []
 ## size of got = 8 * (num rela.dyn + num rela.plt)
 ## size of .plt = 16 * (num rela.plt) + 16
 
+def add_functions_to_got(elf_object,file,offset,size,plt_sec_inject_offset,got_alignment_size):
+    sizes = [8]
+    plt_sec_entry_size = 16
+    assert sum(sizes) * len(symbol_names) == size, "values not equal"
+    for i in range(len(symbol_names)):
+        add_contents_to_file(offset,file,[plt_sec_inject_offset],sizes)
+        plt_sec_inject_offset = plt_sec_inject_offset + plt_sec_entry_size
+        offset+= sum(sizes)
+    num_bytes_to_align = got_alignment_size - size
+    if num_bytes_to_align > 0:
+        align_section(file,offset,num_bytes_to_align)
+
 def edit_got_section(elf_object,original_file,inject_offset,size):
     section_header_table = elf_object['e_shoff']
     section_header_size = elf_object['e_shentsize']
     section_size_offset = 32
     got_index = elf_object.get_section_index('.got')
-    got_section = elf_object.get_section_by_name("got")
+    got_section = elf_object.get_section_by_name(".got")
 
     got_section_size = got_section['sh_size']
     total_section_size_offset = section_header_table + section_header_size * got_index + section_size_offset
@@ -450,7 +490,7 @@ def edit_got_section(elf_object,original_file,inject_offset,size):
     modify_file(original_file,total_section_size_offset,(got_section_size+size).to_bytes(8,'little'))
 
 
-def add_functions_to_plt_sec(elf_object,file,offset,size):
+def add_functions_to_plt_sec(elf_object,file,offset,size,plt_sec_alignment_size):
     sizes = [4,3,4,5]
     assert sum(sizes) * len(symbol_names) == size, "values not equal"
     endbr64 = 0xfa1e0ff3
@@ -460,6 +500,9 @@ def add_functions_to_plt_sec(elf_object,file,offset,size):
         jmp_offset = 0x0 # Need to change from 0x0
         add_contents_to_file(offset,file,[endbr64,jmp,jmp_offset,nopl],sizes)
         offset+= sum(sizes)
+    num_bytes_to_align = plt_sec_alignment_size - size
+    if num_bytes_to_align > 0:
+        align_section(file,offset,num_bytes_to_align)
 
 def edit_plt_sec_section(elf_object,original_file,inject_offset,size):
     section_header_table = elf_object['e_shoff']
@@ -473,7 +516,7 @@ def edit_plt_sec_section(elf_object,original_file,inject_offset,size):
     #print(hex(text_section_size))
     modify_file(original_file,total_section_size_offset,(plt_sec_section_size+size).to_bytes(8,'little'))
 
-def add_functions_to_plt(elf_object,file,offset,size,plt_offset,num_relocations_plt):
+def add_functions_to_plt(elf_object,file,offset,size,plt_offset,num_relocations_plt,plt_alignment_size):
     sizes = [4,1,4,2,4,1]
     assert sum(sizes) * len(symbol_names) == size, "values not equal"
     endbr64 = 0xfa1e0ff3
@@ -487,6 +530,9 @@ def add_functions_to_plt(elf_object,file,offset,size,plt_offset,num_relocations_
         offset+= sum(sizes)
         push_val = push_val + 1
         jmp_offset = jmp_offset - 16
+    num_bytes_to_align = plt_alignment_size - size
+    if num_bytes_to_align > 0:
+        align_section(file,offset,num_bytes_to_align)
 
 def edit_plt_section(elf_object,original_file,inject_offset,size):
     section_header_table = elf_object['e_shoff']
@@ -581,7 +627,14 @@ section = elf.get_section(6)
 for i in range(section.num_symbols()):
     print(section.get_symbol(i)['st_name'])"""
 
-
+def align_offsets(elf_object,sections,sizes):
+    aligned_sizes = []
+    for i in range(len(sections)):
+        index = elf_object.get_section_index(sections[i])
+        next_section_index = index + 1
+        next_section_align = elf_object.get_section(next_section_index)['sh_addralign']
+        aligned_sizes.append(sizes[i] + sizes[i] % next_section_align)
+    return aligned_sizes
 
 ########
 
@@ -609,6 +662,12 @@ plt_offset = section['sh_offset']
 plt_size = len(symbol_names) * plt_entry_size
 plt_num_relocations = elf.get_section_by_name(".rela.plt").num_relocations()
 
+#.got
+section = elf.get_section_by_name(".got")
+got_inject_offset = section['sh_offset'] + section['sh_size']
+got_entry_size = section['sh_entsize']
+got_offset = section['sh_offset']
+got_size = got_entry_size * len(symbol_names)
 
 #.gnu.version
 section = elf.get_section_by_name(".gnu.version")
@@ -647,22 +706,39 @@ dyn_str_offset = elf.get_section_by_name(".dynstr")['sh_offset']
 gnu_version_offset = elf.get_section_by_name(".gnu.version")['sh_offset']
 gnu_version_r_offset = elf.get_section_by_name(".gnu.version_r")['sh_offset']
 
-section_offsets = [sym_tab_offset,plt_sec_offset,plt_offset,rela_plt_offset,gnu_version_r_offset,gnu_version_offset,dyn_str_offset,dyn_sym_offset]
-elf_sections_changes = ['.symtab','.plt.sec','.plt','.rela.plt','.gnu.version_r','.gnu.version','.dynstr','.dynsym']
-elf_sections_changes_sizes = [sym_tab_size,plt_sec_size,plt_size,rela_plt_size,gnu_version_r_size,gnu_version_size,dyn_str_size,dyn_sym_size]
-inject_offsets = [sym_tab_inject_offset,plt_sec_inject_offset,plt_inject_offset,rela_plt_inject_offset,gnu_version_r_inject_offset,gnu_version_inject_offset,dyn_str_inject_offset,dyn_sym_inject_offset]
+section_offsets = [sym_tab_offset,got_offset,plt_sec_offset,plt_offset,rela_plt_offset,gnu_version_r_offset,gnu_version_offset,dyn_str_offset,dyn_sym_offset]
+elf_sections_changes = ['.symtab','.got','.plt.sec','.plt','.rela.plt','.gnu.version_r','.gnu.version','.dynstr','.dynsym']
+elf_sections_changes_sizes = [sym_tab_size,got_size,plt_sec_size,plt_size,rela_plt_size,gnu_version_r_size,gnu_version_size,dyn_str_size,dyn_sym_size]
+inject_offsets = [sym_tab_inject_offset,got_inject_offset,plt_sec_inject_offset,plt_inject_offset,rela_plt_inject_offset,gnu_version_r_inject_offset,gnu_version_inject_offset,dyn_str_inject_offset,dyn_sym_inject_offset]
+elf_sections_alignment_sizes = align_offsets(elf,elf_sections_changes,elf_sections_changes_sizes) 
+
+def get_alignment_size(section_name):
+    return elf_sections_alignment_sizes[elf_sections_changes.index(section_name)]
+
+sym_tab_alignment_size = get_alignment_size('.symtab')
+got_alignment_size = get_alignment_size('.got')
+plt_sec_alignment_size = get_alignment_size('.plt.sec')
+plt_alignment_size = get_alignment_size('.plt')
+rela_plt_alignment_size = get_alignment_size('.rela.plt')
+gnu_version_r_alignment_size = get_alignment_size('.gnu.version_r')
+gnu_version_alignment_size = get_alignment_size('.gnu.version')
+dyn_str_alignment_size = get_alignment_size('.dynstr')
+dyn_sym_alignment_size = get_alignment_size('.dynsym')
+
 print("SECTIONS",elf_sections_changes)
 print("SIZES",elf_sections_changes_sizes)
+print("ALIGNMENT SIZES",elf_sections_alignment_sizes)
 print("SECTION OFFSETS",section_offsets)
 print("INJECT OFFSETS",inject_offsets)
-edit_symbol_table(elf,f,inject_offsets,elf_sections_changes_sizes)
-edit_program_header(elf,f,section_offsets,elf_sections_changes_sizes)
-edit_dynamic_section(elf,f,section_offsets,elf_sections_changes_sizes)
-edit_rela_dyn_section(elf,f,inject_offsets,elf_sections_changes_sizes)
-edit_elf_sections(elf,f,elf_sections_changes,elf_sections_changes_sizes)
+edit_symbol_table(elf,f,inject_offsets,elf_sections_alignment_sizes)
+edit_program_header(elf,f,section_offsets,elf_sections_alignment_sizes)
+edit_dynamic_section(elf,f,section_offsets,elf_sections_alignment_sizes)
+edit_rela_dyn_section(elf,f,inject_offsets,elf_sections_alignment_sizes)
+edit_elf_sections(elf,f,elf_sections_changes,elf_sections_alignment_sizes)
 
 
 edit_sym_tab_section(elf,f,sym_tab_size)
+edit_got_section(elf,f,got_inject_offset,got_size)
 edit_plt_sec_section(elf,f,plt_sec_inject_offset,plt_sec_size)
 edit_plt_section(elf,f,plt_inject_offset,plt_size)
 edit_rela_plt_section(elf,f,inject_offsets,rela_plt_size)
@@ -670,19 +746,20 @@ edit_gnu_version_r_section(elf,f,inject_offsets,gnu_version_r_size)
 edit_gnu_version_section(elf,f,inject_offsets,gnu_version_size)
 edit_dyn_str_section(elf,f,dyn_str_size)
 edit_dyn_sym_section(elf,f,inject_offsets,dyn_sym_size)
-modify_file(f,40,(elf['e_shoff']+sum(elf_sections_changes_sizes)).to_bytes(8,'little'))
+modify_file(f,40,(elf['e_shoff']+sum(elf_sections_alignment_sizes)).to_bytes(8,'little'))
 print("Num symbols to add ",len(symbol_names))
 #dyn_sym_size = elf.get_section_by_name(".dynsym")['sh_entsize']
 #dyn_sym_offset = elf.get_section_by_name(".dynsym")['sh_offset'] + elf.get_section_by_name(".dynsym")['sh_size']
 
-add_functions_to_sym_tab(elf,f,sym_tab_size)
-add_functions_to_plt_sec(elf,f,plt_sec_inject_offset,plt_sec_size)
-add_functions_to_plt(elf,f,plt_inject_offset,plt_size,plt_offset,plt_num_relocations)
-add_functions_to_rela_plt(elf,f,rela_plt_inject_offset,rela_plt_size)
-add_versions_to_gnu_version_r(elf,f,gnu_version_r_inject_offset,gnu_version_r_offset,dyn_str_inject_offset-dyn_str_offset,gnu_version_r_size)
-add_versions_to_gnu_version(elf,f,gnu_version_inject_offset,gnu_version_size)
-add_strings_to_dyn_str_tab(elf,f,dyn_str_inject_offset,dyn_str_size)
-add_functions_to_dyn_sym(elf,f,dyn_sym_inject_offset,dyn_sym_size,dyn_str_inject_offset-dyn_str_offset)
+add_functions_to_sym_tab(elf,f,sym_tab_size,sym_tab_alignment_size)
+add_functions_to_got(elf,f,got_inject_offset,got_size,plt_sec_inject_offset,got_alignment_size)
+add_functions_to_plt_sec(elf,f,plt_sec_inject_offset,plt_sec_size,plt_sec_alignment_size)
+add_functions_to_plt(elf,f,plt_inject_offset,plt_size,plt_offset,plt_num_relocations,plt_alignment_size)
+add_functions_to_rela_plt(elf,f,rela_plt_inject_offset,rela_plt_size,rela_plt_alignment_size)
+add_versions_to_gnu_version_r(elf,f,gnu_version_r_inject_offset,gnu_version_r_offset,dyn_str_inject_offset-dyn_str_offset,gnu_version_r_size,gnu_version_r_alignment_size)
+add_versions_to_gnu_version(elf,f,gnu_version_inject_offset,gnu_version_size,gnu_version_alignment_size)
+add_strings_to_dyn_str_tab(elf,f,dyn_str_inject_offset,dyn_str_size,dyn_str_alignment_size)
+add_functions_to_dyn_sym(elf,f,dyn_sym_inject_offset,dyn_sym_size,dyn_str_inject_offset-dyn_str_offset,dyn_sym_alignment_size)
 
 
 
