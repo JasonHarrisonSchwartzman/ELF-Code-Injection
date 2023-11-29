@@ -178,18 +178,46 @@ def edit_dynamic_section(elf_object,original_file,inject_offsets,sizes):
             size = get_total_increased_offset(inject_offsets,tag_value,sizes)
             modify_file(original_file,dynamic_section_offset + dynamic_section_entry_size * i + value_offset,(tag_value+size).to_bytes(8,'little'))
 
-def edit_rela_dyn_section(elf_object,original_file,inject_offsets,sizes):
+def get_section_index_of_offset(elf_object,offset):
+    for i in range(elf_object.num_sections()):
+        section = elf_object.get_section(i)
+        if offset >=section['sh_offset'] and offset < (section['sh_offset'] + section['sh_size']):
+            return i
+    return None
+
+def get_section_index_of_virtual_offset(elf_object,offset):
+    for i in range(elf_object.num_segments()):
+        segment = elf_object.get_segment(i)
+        if offset >= segment['p_vaddr'] and offset < (segment['p_vaddr'] + segment['p_memsz']):
+            offset = offset - (segment['p_vaddr'] - segment['p_offset'])
+            print("NEW OFFSET",offset)
+            return get_section_index_of_offset(elf_object,offset)
+    return None
+
+def edit_rela_dyn_section(elf_object,original_file,inject_offsets,elf_sections_changes,sizes):
     rela_dyn_section = elf_object.get_section_by_name(".rela.dyn")
     rela_dyn_section_offset = elf_object.get_section_by_name(".rela.dyn")['sh_offset']
     rela_dyn_relo_size = 24
     rela_dyn_num_relocations = rela_dyn_section.num_relocations()
     relative_type = 8
+    rela_dyn_entry_offset = rela_dyn_section['sh_offset']
+    rela_dyn_entry_size = rela_dyn_section['sh_entsize']
+    got_sec_index = elf_object.get_section_index('.data')
+    indices = get_indices_of_sections(elf_object,elf_sections_changes)
+    #increased_size = get_increased_size_after_section(indices,0,elf_sections_alignment_sizes,got_sec_index)
     for i in range(rela_dyn_num_relocations):
-        if rela_dyn_section.get_relocation(i)['r_info'] != relative_type:
-            continue
-        rela_dyn_offset = rela_dyn_section.get_relocation(i)['r_offset']
-        size = get_total_increased_offset(inject_offsets,rela_dyn_offset,sizes)
-        modify_file(original_file,rela_dyn_section_offset + i * rela_dyn_relo_size,(rela_dyn_offset+size).to_bytes(8,'little'))
+        #section_index = elf_object.get_section_index('.data')
+        rela_dyn_relocation_offset = rela_dyn_section.get_relocation(i)['r_offset']
+        section_index = get_section_index_of_virtual_offset(elf_object,rela_dyn_relocation_offset)
+        print("RELA DYN OFFSET:",hex(rela_dyn_relocation_offset),"SECTION INDEX OF RELA DYN ENTRY:",section_index)
+        increased_size = get_increased_size_after_section(indices,0,elf_sections_alignment_sizes,section_index)
+        modify_file(original_file,rela_dyn_entry_offset,(rela_dyn_relocation_offset + increased_size).to_bytes(8,'little'))
+        rela_dyn_entry_offset = rela_dyn_entry_offset + rela_dyn_entry_size
+        #if rela_dyn_section.get_relocation(i)['r_info'] != relative_type:
+        #    continue
+        #size = get_total_increased_offset(inject_offsets,rela_dyn_offset,sizes)
+        #modify_file(original_file,rela_dyn_section_offset + i * rela_dyn_relo_size,(rela_dyn_offset+size).to_bytes(8,'little'))
+        
 
 def offset_in_rela(elf_object,offset):
     rela_dyn_section = elf_object.get_section_by_name(".rela.dyn")
@@ -277,7 +305,7 @@ def insert_bytes_in_elf(elf_bytes, offset, bytes_to_insert):
     
     return bytes(elf_bytearray)
 
-sym_versions = [2,2,2,2,2,3,2,2,0]
+sym_versions = [2,2,2,2,2,3,2,2]
 symbol_names = [  "memset", "close", "read","connect","socket", "__stack_chk_fail","write","strlen"]
 GLIBC_versions = ["GLIBC_2.4"]
 string_names = [ "memset", "close", "read", "connect","socket", "__stack_chk_fail","write","strlen","GLIBC_2.4"]
@@ -390,20 +418,35 @@ def get_index_of_symbol_in_dyn_sym(symbol_name):
         return dyn_sym_symbol_names.index(symbol_name)
     return len(dyn_sym_symbol_names) + symbol_names.index(symbol_name)
 
-def add_functions_to_rela_plt(elf_object,file,offset,size,rela_plt_alignment_size):
+def calculate_got_virtual_address_change(elf_object):
+    section = elf_object.get_section_by_name('.got')
+    for i in range(elf_object.num_segments()):
+        segment = elf_object.get_segment(i)
+        if segment.section_in_segment(section):
+            print("Found section. Offset:",hex(segment['p_vaddr']-segment['p_offset']))
+            return segment['p_vaddr']-segment['p_offset']
+    return None
+
+
+def add_functions_to_rela_plt(elf_object,file,offset,size,rela_plt_alignment_size,got_inject_offset,elf_section_changes,elf_sections_alignment_sizes,got_virtual_address_change):
     section = elf_object.get_section_by_name(".rela.plt")
     #for i in range(section.num_relocations()):
         #print(section.get_relocation(i))
     #offset = section['sh_offset'] + section['sh_size']
     #print("RELA PLT OFFSET:",hex(offset))
+
+    print("GOt address change:",got_virtual_address_change)
+    got_entry_size = 8
+    got_new_offset = calculate_new_offset(got_inject_offset,'.got',elf_section_changes,elf_sections_alignment_sizes)
     sizes = [8,8,8]
     assert sum(sizes) * len(symbol_names) == size, "values not equal"
     for i in range(len(symbol_names)):
         index = get_index_of_symbol_in_dyn_sym(symbol_names[i])
         info = index * 0x100000000 + 0x7
-        rela_offset = 0x3cf8 # PLACEHOLDER FOR LATER
-        add_contents_to_file(offset,file,[0,info,0x0],sizes)
+        rela_offset = got_new_offset + got_virtual_address_change
+        add_contents_to_file(offset,file,[rela_offset,info,0x0],sizes)
         #print('added')
+        got_new_offset = got_new_offset + got_entry_size
         offset+= section['sh_entsize']
     num_bytes_to_align = rela_plt_alignment_size - size
     if num_bytes_to_align > 0:
@@ -460,16 +503,16 @@ dyn_sym_symbol_names = []
 ## size of got = 8 * (num rela.dyn + num rela.plt)
 ## size of .plt = 16 * (num rela.plt) + 16
 
-def calculate_new_plt_sec_offset(plt_sec_inject_offset,elf_sections_changes,elf_sections_alignment_changes):
-    plt_sec_index = elf_sections_changes.index('.plt.sec')
-    for i in range(plt_sec_index+1,len(elf_sections_changes)):
-        plt_sec_inject_offset = plt_sec_inject_offset + elf_sections_alignment_changes[i]
-    return plt_sec_inject_offset
+def calculate_new_offset(offset,section,elf_sections_changes,elf_sections_alignment_changes):
+    index = elf_sections_changes.index(section)
+    for i in range(index+1,len(elf_sections_changes)):
+        offset = offset + elf_sections_alignment_changes[i]
+    return offset
 
 def add_functions_to_got(elf_object,file,offset,size,plt_sec_inject_offset,got_alignment_size,elf_sections_changes,elf_sections_alignment_changes):
     sizes = [8]
     plt_sec_entry_size = 16
-    plt_sec_inject_offset = calculate_new_plt_sec_offset(plt_sec_inject_offset,elf_sections_changes,elf_sections_alignment_changes)
+    plt_sec_inject_offset = calculate_new_offset(plt_sec_inject_offset,'.plt.sec',elf_sections_changes,elf_sections_alignment_changes)
     assert sum(sizes) * len(symbol_names) == size, "values not equal"
     print("adding functions to GOT starting at plt_sec_inject_offset:",hex(plt_sec_inject_offset))
     for i in range(len(symbol_names)):
@@ -563,14 +606,32 @@ def edit_dyn_sym_section(elf_object,original_file,inject_offset,size):
     #print(hex(text_section_size))
     modify_file(original_file,total_section_size_offset,(dyn_sym_section_size+size).to_bytes(8,'little'))
 
+def get_increased_size_after_section(indices,index,sizes,end_index):
+    size = 0
+    for j in range(len(indices)):
+        if end_index > indices[j]:
+            print("SIZES TO ADD",sizes[j])
+            size+=sizes[j]
+    return size
 
 
-def edit_rela_plt_section(elf_object,original_file,inject_offset,size):
+def edit_rela_plt_section(elf_object,original_file,inject_offset,size,elf_sections_changes,elf_sections_alignment_sizes):
     section_header_table = elf_object['e_shoff']
     section_header_size = elf_object['e_shentsize']
     section_size_offset = 32
     rela_plt_index = elf_object.get_section_index('.rela.plt')
     rela_plt_section = elf_object.get_section_by_name(".rela.plt")
+    rela_plt_entry_size = rela_plt_section['sh_entsize']
+    rela_plt_entry_offset = rela_plt_section['sh_offset']
+    got_sec_index = elf_object.get_section_index('.got')
+    indices = get_indices_of_sections(elf_object,elf_sections_changes)
+    increased_size = get_increased_size_after_section(indices,rela_plt_index,elf_sections_alignment_sizes,got_sec_index)
+    print("SIZE DIFF RELA PLT:",increased_size)
+    for i in range(rela_plt_section.num_relocations()):
+        relocation_offset = rela_plt_section.get_relocation(i)['r_offset']
+        print("RELOCATION OFFSET",hex(relocation_offset))
+        modify_file(original_file,rela_plt_entry_offset,(relocation_offset + increased_size).to_bytes(8,'little'))
+        rela_plt_entry_offset = rela_plt_entry_offset + rela_plt_entry_size
     rela_plt_section_size = rela_plt_section['sh_size']
     total_section_size_offset = section_header_table + section_header_size * rela_plt_index + section_size_offset
     #print(hex(text_section_size))
@@ -679,7 +740,7 @@ got_inject_offset = section['sh_offset'] + section['sh_size']
 got_entry_size = section['sh_entsize']
 got_offset = section['sh_offset']
 got_size = got_entry_size * len(symbol_names)
-
+got_virtual_address_change = calculate_got_virtual_address_change(elf)
 #.gnu.version
 section = elf.get_section_by_name(".gnu.version")
 gnu_version_inject_offset = section['sh_offset'] + section['sh_size']
@@ -742,9 +803,10 @@ print("ALIGNMENT SIZES",elf_sections_alignment_sizes)
 print("SECTION OFFSETS",section_offsets)
 print("INJECT OFFSETS",inject_offsets)
 edit_symbol_table(elf,f,inject_offsets,elf_sections_alignment_sizes)
-edit_program_header(elf,f,section_offsets,elf_sections_alignment_sizes)
 edit_dynamic_section(elf,f,section_offsets,elf_sections_alignment_sizes)
-edit_rela_dyn_section(elf,f,inject_offsets,elf_sections_alignment_sizes)
+edit_rela_dyn_section(elf,f,inject_offsets,elf_sections_changes,elf_sections_alignment_sizes)
+edit_rela_plt_section(elf,f,inject_offsets,rela_plt_size,elf_sections_changes,elf_sections_alignment_sizes)
+edit_program_header(elf,f,section_offsets,elf_sections_alignment_sizes)
 edit_elf_sections(elf,f,elf_sections_changes,elf_sections_alignment_sizes)
 
 
@@ -752,7 +814,7 @@ edit_sym_tab_section(elf,f,sym_tab_size)
 edit_got_section(elf,f,got_inject_offset,got_size)
 edit_plt_sec_section(elf,f,plt_sec_inject_offset,plt_sec_size)
 edit_plt_section(elf,f,plt_inject_offset,plt_size)
-edit_rela_plt_section(elf,f,inject_offsets,rela_plt_size)
+#edit_rela_plt_section(elf,f,inject_offsets,rela_plt_size,elf_sections_changes,elf_sections_alignment_sizes)
 edit_gnu_version_r_section(elf,f,inject_offsets,gnu_version_r_size)
 edit_gnu_version_section(elf,f,inject_offsets,gnu_version_size)
 edit_dyn_str_section(elf,f,dyn_str_size)
@@ -766,7 +828,7 @@ add_functions_to_sym_tab(elf,f,sym_tab_size,sym_tab_alignment_size)
 add_functions_to_got(elf,f,got_inject_offset,got_size,plt_sec_inject_offset,got_alignment_size,elf_sections_changes,elf_sections_alignment_sizes)
 add_functions_to_plt_sec(elf,f,plt_sec_inject_offset,plt_sec_size,plt_sec_alignment_size)
 add_functions_to_plt(elf,f,plt_inject_offset,plt_size,plt_offset,plt_num_relocations,plt_alignment_size)
-add_functions_to_rela_plt(elf,f,rela_plt_inject_offset,rela_plt_size,rela_plt_alignment_size)
+add_functions_to_rela_plt(elf,f,rela_plt_inject_offset,rela_plt_size,rela_plt_alignment_size,got_inject_offset,elf_sections_changes,elf_sections_alignment_sizes,got_virtual_address_change)
 add_versions_to_gnu_version_r(elf,f,gnu_version_r_inject_offset,gnu_version_r_offset,dyn_str_inject_offset-dyn_str_offset,gnu_version_r_size,gnu_version_r_alignment_size)
 add_versions_to_gnu_version(elf,f,gnu_version_inject_offset,gnu_version_size,gnu_version_alignment_size)
 add_strings_to_dyn_str_tab(elf,f,dyn_str_inject_offset,dyn_str_size,dyn_str_alignment_size)
