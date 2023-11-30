@@ -536,16 +536,22 @@ def edit_got_section(elf_object,original_file,inject_offset,size):
     modify_file(original_file,total_section_size_offset,(got_section_size+size).to_bytes(8,'little'))
 
 
-def add_functions_to_plt_sec(elf_object,file,offset,size,plt_sec_alignment_size):
+def add_functions_to_plt_sec(elf_object,file,offset,size,elf_section_changes,plt_sec_alignment_size,got_virtual_address_change):
     sizes = [4,3,4,5]
     assert sum(sizes) * len(symbol_names) == size, "values not equal"
     endbr64 = 0xfa1e0ff3
     jmp = 0x25fff2
     nopl = 0x0000441f0f
+    got_entry_size = 8
+    got_new_offset = calculate_new_offset(got_inject_offset,'.got',elf_section_changes,elf_sections_alignment_sizes)
+    plt_sec_new_offset = calculate_new_offset(offset,'.plt.sec',elf_section_changes,elf_sections_alignment_sizes) + 0xb # 0xb is the distance from the start of the pltsec entry to the rip that is used for calculating relative offset
     for i in range(len(symbol_names)):
-        jmp_offset = 0x0 # Need to change from 0x0
+        print("what do i think the offset is",hex(plt_sec_new_offset))
+        jmp_offset = got_new_offset + got_virtual_address_change - plt_sec_new_offset
         add_contents_to_file(offset,file,[endbr64,jmp,jmp_offset,nopl],sizes)
         offset+= sum(sizes)
+        plt_sec_new_offset += sum(sizes)
+        got_new_offset = got_new_offset + got_entry_size
     num_bytes_to_align = plt_sec_alignment_size - size
     if num_bytes_to_align > 0:
         align_section(file,offset,num_bytes_to_align)
@@ -826,7 +832,7 @@ print("Num symbols to add ",len(symbol_names))
 
 add_functions_to_sym_tab(elf,f,sym_tab_size,sym_tab_alignment_size)
 add_functions_to_got(elf,f,got_inject_offset,got_size,plt_sec_inject_offset,got_alignment_size,elf_sections_changes,elf_sections_alignment_sizes)
-add_functions_to_plt_sec(elf,f,plt_sec_inject_offset,plt_sec_size,plt_sec_alignment_size)
+add_functions_to_plt_sec(elf,f,plt_sec_inject_offset,plt_sec_size,elf_sections_changes,plt_sec_alignment_size,got_virtual_address_change)
 add_functions_to_plt(elf,f,plt_inject_offset,plt_size,plt_offset,plt_num_relocations,plt_alignment_size)
 add_functions_to_rela_plt(elf,f,rela_plt_inject_offset,rela_plt_size,rela_plt_alignment_size,got_inject_offset,elf_sections_changes,elf_sections_alignment_sizes,got_virtual_address_change)
 add_versions_to_gnu_version_r(elf,f,gnu_version_r_inject_offset,gnu_version_r_offset,dyn_str_inject_offset-dyn_str_offset,gnu_version_r_size,gnu_version_r_alignment_size)
