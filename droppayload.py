@@ -144,18 +144,23 @@ def edit_text_section(elf_object,original_file,inject_offset,size):
 
 
 
-def edit_symbol_table(elf_object,original_file,inject_offsets,sizes):
+def edit_symbol_table(elf_object,original_file,inject_offsets,elf_sections_changes,sizes):
     value_offset = 8
     sym_tab = elf_object.get_section_by_name(".symtab")
     sym_tab_offset = sym_tab['sh_offset']
     sym_size = 24
     num_symbols = sym_tab.num_symbols()
 
+    indices = get_indices_of_sections(elf_object,elf_sections_changes)
 
     for i in range(num_symbols):
         sym = sym_tab.get_symbol(i)['st_value']
-        size = get_total_increased_offset(inject_offsets,sym,sizes)
+        #size = get_total_increased_offset(indices,sym,sizes)
         #if (sym > inject_offset):
+        size = calculate_new_offset_of_constant_section(sym,elf_object,elf_sections_changes,sizes)
+        print(sym)
+        if size is None:
+            continue
         modify_file(original_file,sym_tab_offset + sym_size * i + value_offset,(sym+size).to_bytes(8,'little'))
 
 def edit_dynamic_section(elf_object,original_file,elf_sections_changes,sizes):
@@ -674,6 +679,8 @@ def edit_sym_tab_section(elf_object,original_file,size):
 def calculate_new_offset_of_constant_section(offset,elf_object,elf_sections_changes,elf_sections_alignment_sizes):
     index = get_section_index_of_offset(elf_object,offset)
     print(index)
+    if index is None:
+        return 0
     indices = get_indices_of_sections(elf_object,elf_sections_changes)
     return get_total_increased_offset(indices,index,elf_sections_alignment_sizes)
 
@@ -838,7 +845,7 @@ print("ALIGNMENT SIZES",elf_sections_alignment_sizes)
 print("SECTION OFFSETS",section_offsets)
 print("INJECT OFFSETS",inject_offsets)
 edit_entry_point(elf,f,elf_sections_changes,elf_sections_alignment_sizes)
-edit_symbol_table(elf,f,inject_offsets,elf_sections_alignment_sizes)
+edit_symbol_table(elf,f,inject_offsets,elf_sections_changes,elf_sections_alignment_sizes)
 edit_dynamic_section(elf,f,elf_sections_changes,elf_sections_alignment_sizes)
 edit_rela_dyn_section(elf,f,inject_offsets,elf_sections_changes,elf_sections_alignment_sizes)
 edit_rela_plt_section(elf,f,inject_offsets,rela_plt_size,elf_sections_changes,elf_sections_alignment_sizes)
