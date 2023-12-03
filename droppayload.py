@@ -1,15 +1,3 @@
-#write
-#strlen
-#__stack_chk_fail
-#htons
-#memset
-#close
-#read
-#gethostbyname
-#memcpy
-#connect
-#socket
-
 from elftools import *
 from elftools.elf.elffile import ELFFile
 from elftools.elf.enums import ENUM_D_TAG_COMMON
@@ -18,6 +6,8 @@ from iced_x86 import *
 import os
 import array
 import unittest
+from capstone import *
+import array
 
 # Initialize the Capstone disassembler
 md = Cs(CS_ARCH_X86, CS_MODE_64)
@@ -25,9 +15,37 @@ md = Cs(CS_ARCH_X86, CS_MODE_64)
 modifications = [] # contains 
 offsets = [] # offsets of what to change
 
+# Overwrites file with data at given offset
 def modify_file(original_file,offset,data):
     original_file.seek(offset)
     original_file.write(data)
+
+# Reads file as bytes
+def read_elf_file(file_path):
+    with open(file_path, 'rb') as file:
+        return file.read()
+
+# Writes bytes to file
+def write_elf_file(data, file_path):
+    with open(file_path, 'wb') as file:
+        file.write(data)
+
+# Inserts bytes at a specified offset in file
+def insert_bytes_in_elf(elf_bytes, offset, bytes_to_insert):
+    elf_bytearray = bytearray(elf_bytes)
+    
+    if offset >= len(elf_bytearray):
+        raise ValueError(f"Offset {offset} is out of bounds for the ELF file.")
+    
+    elf_bytearray[offset:offset] = bytes_to_insert
+    
+    return bytes(elf_bytearray)
+
+sym_versions = [2,2,2,2,2,3,2,2] # Versions of below symbols
+symbol_names = [  "memset", "close", "read","connect","socket", "__stack_chk_fail","write","strlen"]
+GLIBC_versions = ["GLIBC_2.4"] # strings of versions
+string_names = [ "memset", "close", "read", "connect","socket", "__stack_chk_fail","write","strlen","GLIBC_2.4"]
+str_tab_entries = [] # strings of above string_names layed out byte by byte (computed later)
 
 def edit_elf_section(elf_object,original_file,elf_section,section_index,size):   
     section_header_table = elf_object['e_shoff']
@@ -38,11 +56,8 @@ def edit_elf_section(elf_object,original_file,elf_section,section_index,size):
     total_section_offset_offset = section_header_table + section_header_size * section_index + section_offset_offset
     section_offset = elf_section['sh_offset'] 
     section_addr = elf_section['sh_addr']
-    #if section_index == 11:
-    #print("Section",section_index ,"increase offset by",hex(size))
-    #changing offset
+
     modify_file(original_file,total_section_offset_offset,(size + section_offset).to_bytes(8,'little'))
-    #changing virtual address
     modify_file(original_file,total_section_addr_offset,(size + section_addr).to_bytes(8,'little'))
 
 def get_indices_of_sections(elf_object,sections):
@@ -151,25 +166,27 @@ def edit_symbol_table(elf_object,original_file,inject_offsets,elf_sections_chang
     sym_size = 24
     num_symbols = sym_tab.num_symbols()
 
-    indices = get_indices_of_sections(elf_object,elf_sections_changes)
 
+    indices = get_indices_of_sections(elf_object,elf_sections_changes)
     for i in range(num_symbols):
         sym = sym_tab.get_symbol(i)['st_value']
         #size = get_total_increased_offset(indices,sym,sizes)
         #if (sym > inject_offset):
-        size = calculate_new_offset_of_constant_section(sym,elf_object,elf_sections_changes,sizes)
-        print(sym)
-        if size is None:
+        section_index = get_section_index_of_virtual_offset(elf_object,sym)
+        if section_index is None:
             continue
-        modify_file(original_file,sym_tab_offset + sym_size * i + value_offset,(sym+size).to_bytes(8,'little'))
+        increased_size = get_increased_size_after_section(indices,0,elf_sections_alignment_sizes,section_index)
+        
+        size = calculate_new_offset_of_constant_section(sym,elf_object,elf_sections_changes,sizes)
+        if size is None or increased_size is None:
+            continue
+        modify_file(original_file,sym_tab_offset + sym_size * i + value_offset,(sym+increased_size).to_bytes(8,'little'))
 
 def edit_dynamic_section(elf_object,original_file,elf_sections_changes,sizes):
     print("-------EDITING DYNAMIC SECTION--------")
     dynamic_section_entry_size = 16
     dynamic_section_offset = elf_object.get_section_by_name(".dynamic")['sh_offset']
-    #print(dynamic_section_offset)
     dynamic_section = elf_object.get_section_by_name(".dynamic")
-    max_common_tag = 0xf00000006ffffff9
     value_offset = 8
     indices = get_indices_of_sections(elf_object,elf_sections_changes)
     for i in range(dynamic_section.num_tags()):
@@ -209,7 +226,6 @@ def get_section_index_of_virtual_offset(elf_object,offset):
         segment = elf_object.get_segment(i)
         if offset >= segment['p_vaddr'] and offset < (segment['p_vaddr'] + segment['p_memsz']):
             offset = offset - (segment['p_vaddr'] - segment['p_offset'])
-            #print("NEW OFFSET",offset)
             return get_section_index_of_offset(elf_object,offset)
     return None
 
@@ -222,20 +238,27 @@ def edit_rela_dyn_section(elf_object,original_file,inject_offsets,elf_sections_c
     rela_dyn_entry_offset = rela_dyn_section['sh_offset']
     rela_dyn_entry_size = rela_dyn_section['sh_entsize']
     got_sec_index = elf_object.get_section_index('.data')
+    addend_offset = 16
     indices = get_indices_of_sections(elf_object,elf_sections_changes)
     #increased_size = get_increased_size_after_section(indices,0,elf_sections_alignment_sizes,got_sec_index)
     for i in range(rela_dyn_num_relocations):
         #section_index = elf_object.get_section_index('.data')
+
         rela_dyn_relocation_offset = rela_dyn_section.get_relocation(i)['r_offset']
         section_index = get_section_index_of_virtual_offset(elf_object,rela_dyn_relocation_offset)
         #print("RELA DYN OFFSET:",hex(rela_dyn_relocation_offset),"SECTION INDEX OF RELA DYN ENTRY:",section_index)
         increased_size = get_increased_size_after_section(indices,0,elf_sections_alignment_sizes,section_index)
         modify_file(original_file,rela_dyn_entry_offset,(rela_dyn_relocation_offset + increased_size).to_bytes(8,'little'))
         rela_dyn_entry_offset = rela_dyn_entry_offset + rela_dyn_entry_size
-        #if rela_dyn_section.get_relocation(i)['r_info'] != relative_type:
-        #    continue
+        if rela_dyn_section.get_relocation(i)['r_info'] != relative_type:
+            continue
+        print(rela_dyn_section.get_relocation(i))
+        relocation_addend = rela_dyn_section.get_relocation(i)['r_addend']
+        section_index = get_section_index_of_virtual_offset(elf_object,relocation_addend)
+        new_offset = get_increased_size_after_section(indices,0,elf_sections_alignment_sizes,section_index)+relocation_addend
+        #new_offset = calculate_new_offset_of_constant_section(rela_dyn_section.get_relocation(i)['r_addend'],elf_object,elf_sections_changes,sizes)+rela_dyn_section.get_relocation(i)['r_addend']
         #size = get_total_increased_offset(inject_offsets,rela_dyn_offset,sizes)
-        #modify_file(original_file,rela_dyn_section_offset + i * rela_dyn_relo_size,(rela_dyn_offset+size).to_bytes(8,'little'))
+        modify_file(original_file,rela_dyn_section_offset + i * rela_dyn_relo_size + addend_offset,(new_offset).to_bytes(8,'little'))
         
 
 def offset_in_rela(elf_object,offset):
@@ -284,8 +307,8 @@ def edit_code_section(elf_object,original_file,section_offset,section_size,injec
             modify_file(original_file,instruction_offset,(rel_mem - next_ip + size if instr.ip < inject_offset < rel_mem else rel_mem - next_ip - size).to_bytes(4,'little',signed=True))
             #print(hex(instr.ip),"|",disasm,hex(rel_mem),"|"," Next instruction: ",hex(next_ip),"|"," Operand ",hex(rel_mem - next_ip)," | Memory offset",hex(instruction_offset)," | Hex Code: ",hex_code)
 
-def edit_text_section_calls(elf_object,original_file,inject_offset,size):
-    modify_file(original_file,0x11a4,(0xc9).to_bytes(1,'little'))
+def edit_text_section_calls(elf_object,original_file,text_offset,elf_sections_changes,elf_sections_alignment_sizes):
+    get_new_text_offset = calculate_new_offset_of_constant_section(text_offset,elf_object,elf_sections_changes,elf_sections_alignment_sizes)
     for i in range(elf_object.num_segments()):
         if elf_object.get_segment(i)['p_flags'] & 0x1 == 1:
             offset = elf_object.get_segment(i)['p_offset']
@@ -294,41 +317,6 @@ def edit_text_section_calls(elf_object,original_file,inject_offset,size):
                 if elf_object.get_section(i)['sh_offset'] >= offset and elf_object.get_section(i)['sh_offset'] < end:
                     edit_code_section(elf_object,original_file,elf_object.get_section(i)['sh_offset'],elf_object.get_section(i)['sh_size'],inject_offset,size)
 
-
-
-
-
-
-import array
-
-# Function to read an ELF file as bytes
-def read_elf_file(file_path):
-    with open(file_path, 'rb') as file:
-        return file.read()
-
-# Function to write bytes to an ELF file
-def write_elf_file(data, file_path):
-    with open(file_path, 'wb') as file:
-        file.write(data)
-
-# Function to insert bytes at a specified offset in an ELF file
-def insert_bytes_in_elf(elf_bytes, offset, bytes_to_insert):
-    elf_bytearray = bytearray(elf_bytes)
-    
-    # Check if the offset is within the ELF file
-    if offset >= len(elf_bytearray):
-        raise ValueError(f"Offset {offset} is out of bounds for the ELF file.")
-    
-    # Insert the bytes at the specified offset
-    elf_bytearray[offset:offset] = bytes_to_insert
-    
-    return bytes(elf_bytearray)
-
-sym_versions = [2,2,2,2,2,3,2,2]
-symbol_names = [  "memset", "close", "read","connect","socket", "__stack_chk_fail","write","strlen"]
-GLIBC_versions = ["GLIBC_2.4"]
-string_names = [ "memset", "close", "read", "connect","socket", "__stack_chk_fail","write","strlen","GLIBC_2.4"]
-str_tab_entries = []
 
 def convert_functions_to_str_tab_entry():
     str_tab_entries.clear()
@@ -678,7 +666,7 @@ def edit_sym_tab_section(elf_object,original_file,size):
 
 def calculate_new_offset_of_constant_section(offset,elf_object,elf_sections_changes,elf_sections_alignment_sizes):
     index = get_section_index_of_offset(elf_object,offset)
-    print(index)
+    #print(index)
     if index is None:
         return 0
     indices = get_indices_of_sections(elf_object,elf_sections_changes)
@@ -819,7 +807,7 @@ dyn_sym_offset = elf.get_section_by_name(".dynsym")['sh_offset']
 dyn_str_offset = elf.get_section_by_name(".dynstr")['sh_offset']
 gnu_version_offset = elf.get_section_by_name(".gnu.version")['sh_offset']
 gnu_version_r_offset = elf.get_section_by_name(".gnu.version_r")['sh_offset']
-
+text_offset = elf.get_section_by_name(".text")['sh_offset']
 section_offsets = [sym_tab_offset,got_offset,plt_sec_offset,plt_offset,rela_plt_offset,gnu_version_r_offset,gnu_version_offset,dyn_str_offset,dyn_sym_offset]
 elf_sections_changes = ['.symtab','.got','.plt.sec','.plt','.rela.plt','.gnu.version_r','.gnu.version','.dynstr','.dynsym']
 elf_sections_changes_sizes = [sym_tab_size,got_size,plt_sec_size,plt_size,rela_plt_size,gnu_version_r_size,gnu_version_size,dyn_str_size,dyn_sym_size]
@@ -853,6 +841,7 @@ edit_program_header(elf,f,section_offsets,elf_sections_alignment_sizes)
 edit_elf_sections(elf,f,elf_sections_changes,elf_sections_alignment_sizes)
 
 
+#edit_text_section_calls(elf,f,text_offset,elf_sections_changes,elf_sections_alignment_sizes)
 edit_sym_tab_section(elf,f,sym_tab_size)
 edit_got_section(elf,f,got_inject_offset,got_size)
 edit_plt_sec_section(elf,f,plt_sec_inject_offset,plt_sec_size)
