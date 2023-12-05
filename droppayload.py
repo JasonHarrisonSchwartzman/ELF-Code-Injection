@@ -58,7 +58,6 @@ str_tab_entries = [] # strings of above string_names layed out byte by byte (com
 
 # converts string names into a list of bytes (NULL-terminated)
 def convert_functions_to_str_tab_entry():
-    str_tab_entries.clear()
     for symbol in string_names:
         for letter in symbol:
             str_tab_entries.append(ord(letter))
@@ -74,14 +73,9 @@ def get_str_index_of_added_str(str_name):
 
 
 def edit_elf_section(elf_section,section_index,size):   
-    section_header_table = ELF['e_shoff']
-    section_header_size = ELF['e_shentsize']
-    section_offset_offset = 24
-    section_addr_offset = 16
 
-
-    total_section_addr_offset = section_header_table + section_header_size * section_index + section_addr_offset
-    total_section_offset_offset = section_header_table + section_header_size * section_index + section_offset_offset
+    total_section_addr_offset = SECTION_HEADER_TABLE_OFFSET + SECTION_HEADER_TABLE_ENTRY_SIZE * section_index + SECTION_HEADER_VIRTUAL_ADDRESS_STRUCT_OFFSET
+    total_section_offset_offset = SECTION_HEADER_TABLE_OFFSET + SECTION_HEADER_TABLE_ENTRY_SIZE * section_index + SECTION_HEADER_FILE_OFFSET_STRUCT_OFFSET
     section_offset = elf_section['sh_offset'] 
     section_addr = elf_section['sh_addr']
 
@@ -116,16 +110,6 @@ def edit_elf_sections():
         size = get_total_increased_offset(indices,i,ELF_SECTIONS_ALIGNMENT_SIZES)
         edit_elf_section(ELF.get_section(i),i,size)
 
-def edit_text_size(size):
-    section_header_table = ELF['e_shoff']
-    section_header_size = ELF['e_shentsize']
-    section_size_offset = 32
-    text_index = 16
-    text_section = ELF.get_section_by_name(".text")
-    text_section_size = text_section['sh_size']
-    total_section_size_offset = section_header_table + section_header_size * text_index + section_size_offset
-    modify_file(total_section_size_offset,(text_section_size+size).to_bytes(8,'little'))
-
 def get_program_header_size_ammount(indices,offset,p_header_size,section_sizes):
     total_size = 0
     for i in range(len(indices)):
@@ -135,28 +119,18 @@ def get_program_header_size_ammount(indices,offset,p_header_size,section_sizes):
     
 
 def edit_program_header(inject_offsets):
-    program_header_offset = ELF['e_phoff']
-    num_segments = ELF.num_segments()
-    offset_offset = 8
-    filesz_offset = 32
-    memsz_offset = 40
-    virtual_offset = 16
-    physical_offset = 24
-    header_size = ELF['e_phentsize']
-    for i in range(num_segments):
+    for i in range(NUM_SEGMENTS):
         segment = ELF.get_segment(i)
+        segment_offset = PROGRAM_HEADER_OFFSET + i * PROGRAM_HEADER_ENTRY_SIZE
+        seg_inject_size = get_program_header_size_ammount(inject_offsets,segment['p_offset'],segment['p_filesz'],ELF_SECTIONS_ALIGNMENT_SIZES)
 
-        seg_size = get_program_header_size_ammount(inject_offsets,segment['p_offset'],segment['p_filesz'],ELF_SECTIONS_ALIGNMENT_SIZES)
-        #if i == 2:
-        #    print("seg_size",hex(seg_size))
-        modify_file(program_header_offset + i * header_size + filesz_offset,(segment['p_filesz']+seg_size).to_bytes(8,'little'))
-        modify_file(program_header_offset + i * header_size + memsz_offset,(segment['p_memsz']+seg_size).to_bytes(8,'little'))
-        #if segment['p_offset'] > inject_offset:
-        size = get_total_increased_offset(inject_offsets,segment['p_offset'],ELF_SECTIONS_ALIGNMENT_SIZES)
-        segment_offset = program_header_offset + i * header_size
-        modify_file(segment_offset + offset_offset,(segment['p_offset']+size).to_bytes(8,'little'))
-        modify_file(segment_offset + virtual_offset,(segment['p_vaddr']+size).to_bytes(8,'little'))
-        modify_file(segment_offset + physical_offset,(segment['p_paddr']+size).to_bytes(8,'little'))
+        modify_file(segment_offset + PROGRAM_HEADER_FILESZ_STRUCT_OFFSET,(segment['p_filesz']+seg_inject_size).to_bytes(8,'little'))
+        modify_file(segment_offset + PROGRAM_HEADER_MEMSZ_STRUCT_OFFSET,(segment['p_memsz']+seg_inject_size).to_bytes(8,'little'))
+
+        increased_offset = get_total_increased_offset(inject_offsets,segment['p_offset'],ELF_SECTIONS_ALIGNMENT_SIZES)
+        modify_file(segment_offset + PROGRAM_HEADER_FILE_OFFSET_STRUCT_OFFSET,(segment['p_offset']+increased_offset).to_bytes(8,'little'))
+        modify_file(segment_offset + PROGRAM_HEADER_VIRTUAL_ADDRESS_STRUCT_OFFSET,(segment['p_vaddr']+increased_offset).to_bytes(8,'little'))
+        modify_file(segment_offset + PROGRAM_HEADER_PHYSICAL_ADDRESS_STRUCT_OFFSET,(segment['p_paddr']+increased_offset).to_bytes(8,'little'))
 
 
 def edit_text_section(inject_offset,size):
@@ -381,17 +355,17 @@ def align_section(offset,num_bytes):
         bytes_to_add.append(0x0)
     add_contents_to_file(offset,bytes_to_add,sizes)
 
-def add_functions_to_sym_tab(size,sym_tab_alignment_size):
+def add_functions_to_sym_tab(sym_tab_alignment_size):
     section = ELF.get_section_by_name(".symtab")
     offset = section['sh_offset'] + section['sh_size']
     sizes = [4,1,1,2,8,8]
-    assert sum(sizes) * len(symbol_names) == size, "values are not equal"
+    assert sum(sizes) * len(symbol_names) == SYM_TAB_INJECT_SIZE, "values are not equal"
     for i in range(len(symbol_names)):
         name = 0x0
         #print(hex(offset))
         add_contents_to_file(offset,[name,0x12,0x0,0x0,0x0,0x0],sizes)
         offset+= section['sh_entsize']
-    num_bytes_to_align = sym_tab_alignment_size - size
+    num_bytes_to_align = sym_tab_alignment_size - SYM_TAB_INJECT_SIZE
     if num_bytes_to_align > 0:
         align_section(offset,num_bytes_to_align)
 
@@ -648,8 +622,7 @@ def get_increased_size_after_section(indices,index,sizes,end_index):
 
 
 def edit_rela_plt_section(inject_offset):
-    section_header_table = ELF['e_shoff']
-    section_header_size = ELF['e_shentsize']
+
     section_size_offset = 32
     rela_plt_index = ELF.get_section_index('.rela.plt')
     rela_plt_section = ELF.get_section_by_name(".rela.plt")
@@ -665,11 +638,11 @@ def edit_rela_plt_section(inject_offset):
         modify_file(rela_plt_entry_offset,(relocation_offset + increased_size).to_bytes(8,'little'))
         rela_plt_entry_offset = rela_plt_entry_offset + rela_plt_entry_size
     rela_plt_section_size = rela_plt_section['sh_size']
-    total_section_size_offset = section_header_table + section_header_size * rela_plt_index + section_size_offset
+    total_section_size_offset = SECTION_HEADER_TABLE_OFFSET + SECTION_HEADER_TABLE_ENTRY_SIZE * rela_plt_index + section_size_offset
     #print(hex(text_section_size))
     modify_file(total_section_size_offset,(rela_plt_section_size+RELA_PLT_INJECT_SIZE).to_bytes(8,'little'))
 
-def edit_sym_tab_section(size):
+def edit_sym_tab_section():
     section_header_table = ELF['e_shoff']
     section_header_size = ELF['e_shentsize']
     section_size_offset = 32
@@ -679,7 +652,7 @@ def edit_sym_tab_section(size):
     total_section_size_offset = section_header_table + section_header_size * sym_tab_index + section_size_offset
     #print(hex(text_section_size))
 
-    modify_file(total_section_size_offset,(sym_tab_section_size+size).to_bytes(8,'little'))
+    modify_file(total_section_size_offset,(sym_tab_section_size+SYM_TAB_INJECT_SIZE).to_bytes(8,'little'))
 
 
 
@@ -739,6 +712,21 @@ def align_offsets(sizes):
 check_duplicate_symbols_and_versions()
 convert_functions_to_str_tab_entry()
 
+
+SECTION_HEADER_TABLE_OFFSET = ELF['e_shoff']
+SECTION_HEADER_TABLE_ENTRY_SIZE = ELF['e_shentsize']
+SECTION_HEADER_FILE_OFFSET_STRUCT_OFFSET = 24
+SECTION_HEADER_VIRTUAL_ADDRESS_STRUCT_OFFSET = 16
+
+PROGRAM_HEADER_OFFSET = ELF['e_phoff']
+NUM_SEGMENTS = ELF.num_segments()
+PROGRAM_HEADER_FILE_OFFSET_STRUCT_OFFSET = 8
+PROGRAM_HEADER_FILESZ_STRUCT_OFFSET = 32
+PROGRAM_HEADER_MEMSZ_STRUCT_OFFSET = 40
+PROGRAM_HEADER_VIRTUAL_ADDRESS_STRUCT_OFFSET = 16
+PROGRAM_HEADER_PHYSICAL_ADDRESS_STRUCT_OFFSET = 24
+PROGRAM_HEADER_ENTRY_SIZE = ELF['e_phentsize']
+
 #.plt.sec
 section = ELF.get_section_by_name(".plt.sec")
 PLT_SEC_INJECT_OFFSET = section['sh_offset'] + section['sh_size']
@@ -774,9 +762,9 @@ NUM_VERSIONS = section.num_versions()
 #.symtab
 section = ELF.get_section_by_name(".symtab")
 if section is not None:
-    sym_tab_inject_offset = section['sh_offset'] + section['sh_size'] #where the end of symble table is
-    sym_tab_size = len(symbol_names) * section['sh_entsize'] #size of functions of add
-    sym_tab_offset = section['sh_offset']
+    SYM_TAB_INJECT_OFFSET = section['sh_offset'] + section['sh_size'] #where the end of symble table is
+    SYM_TAB_INJECT_SIZE = len(symbol_names) * section['sh_entsize'] #size of functions of add
+    SYM_TAB_OFFSET = section['sh_offset']
 #.rela.plt
 section = ELF.get_section_by_name(".rela.plt")
 RELA_PLT_INJECT_OFFSET = section['sh_offset'] + section['sh_size']
@@ -802,10 +790,10 @@ GNU_VERSION_R_OFFSET = ELF.get_section_by_name(".gnu.version_r")['sh_offset']
 
 TEXT_OFFSET = ELF.get_section_by_name(".text")['sh_offset']
 
-section_offsets = [sym_tab_offset,GOT_OFFSET,PLT_SEC_OFFSET,PLT_OFFSET,RELA_PLT_OFFSET,GNU_VERSION_R_OFFSET,GNU_VERSION_OFFSET,DYN_STR_OFFSET,DYN_SYM_OFFSET]
+section_offsets = [SYM_TAB_OFFSET,GOT_OFFSET,PLT_SEC_OFFSET,PLT_OFFSET,RELA_PLT_OFFSET,GNU_VERSION_R_OFFSET,GNU_VERSION_OFFSET,DYN_STR_OFFSET,DYN_SYM_OFFSET]
 ELF_SECTIONS_CHANGES = ['.symtab','.got','.plt.sec','.plt','.rela.plt','.gnu.version_r','.gnu.version','.dynstr','.dynsym']
-elf_sections_changes_sizes = [sym_tab_size,GOT_INJECT_SIZE,PLT_SEC_INJECT_SIZE,PLT_INJECT_SIZE,RELA_PLT_INJECT_SIZE,GNU_VERSION_R_INJECT_SIZE,GNU_VERSION_INJECT_SIZE,DYN_STR_INJECT_SIZE,DYN_SYM_INJECT_SIZE]
-inject_offsets = [sym_tab_inject_offset,GOT_INJECT_OFFSET,PLT_SEC_INJECT_OFFSET,PLT_INJECT_OFFSET,RELA_PLT_INJECT_OFFSET,GNU_VERSION_R_INJECT_OFFSET,GNU_VERSION_INJECT_OFFSET,DYN_STR_INJECT_OFFSET,DYN_SYM_INJECT_OFFSET]
+elf_sections_changes_sizes = [SYM_TAB_INJECT_SIZE,GOT_INJECT_SIZE,PLT_SEC_INJECT_SIZE,PLT_INJECT_SIZE,RELA_PLT_INJECT_SIZE,GNU_VERSION_R_INJECT_SIZE,GNU_VERSION_INJECT_SIZE,DYN_STR_INJECT_SIZE,DYN_SYM_INJECT_SIZE]
+inject_offsets = [SYM_TAB_INJECT_OFFSET,GOT_INJECT_OFFSET,PLT_SEC_INJECT_OFFSET,PLT_INJECT_OFFSET,RELA_PLT_INJECT_OFFSET,GNU_VERSION_R_INJECT_OFFSET,GNU_VERSION_INJECT_OFFSET,DYN_STR_INJECT_OFFSET,DYN_SYM_INJECT_OFFSET]
 ELF_SECTIONS_ALIGNMENT_SIZES = align_offsets(elf_sections_changes_sizes) 
 
 def get_alignment_size(section_name):
@@ -835,7 +823,7 @@ edit_program_header(section_offsets)
 edit_elf_sections()
 
 
-edit_sym_tab_section(sym_tab_size)
+edit_sym_tab_section()
 edit_got_section()
 edit_plt_sec_section()
 edit_plt_section()
@@ -846,7 +834,7 @@ edit_dyn_sym_section(inject_offsets)
 modify_file(40,(ELF['e_shoff']+sum(ELF_SECTIONS_ALIGNMENT_SIZES)).to_bytes(8,'little'))
 print("Num symbols to add ",len(symbol_names))
 
-add_functions_to_sym_tab(sym_tab_size,sym_tab_alignment_size)
+add_functions_to_sym_tab(sym_tab_alignment_size)
 add_functions_to_got(got_alignment_size)
 add_functions_to_plt_sec(plt_sec_alignment_size,got_virtual_address_change)
 add_functions_to_plt(plt_alignment_size)
