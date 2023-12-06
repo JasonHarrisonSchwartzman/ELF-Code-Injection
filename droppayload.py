@@ -162,37 +162,26 @@ def edit_text_section(inject_offset,size):
 
 
 def edit_symbol_table():
-    value_offset = 8
-    sym_tab = ELF.get_section_by_name(".symtab")
-    sym_tab_offset = sym_tab['sh_offset']
-    sym_size = 24
-    num_symbols = sym_tab.num_symbols()
-
 
     indices = get_indices_of_sections()
-    for i in range(num_symbols):
-        sym = sym_tab.get_symbol(i)['st_value']
-        #size = get_total_increased_offset(indices,sym,sizes)
-        #if (sym > inject_offset):
-        section_index = get_section_index_of_virtual_offset(sym)
+    for i in range(NUM_SYMBOLS):
+        sym_value = SYM_TAB_SECTION.get_symbol(i)['st_value']
+
+        section_index = get_section_index_of_virtual_offset(sym_value)
         if section_index is None:
             continue
         increased_size = get_increased_size_after_section(indices,0,ELF_SECTIONS_ALIGNMENT_SIZES,section_index)
         
-        size = calculate_new_offset_of_constant_section(sym,ELF_SECTIONS_CHANGES,ELF_SECTIONS_ALIGNMENT_SIZES)
+        size = calculate_new_offset_of_constant_section(sym_value,ELF_SECTIONS_CHANGES,ELF_SECTIONS_ALIGNMENT_SIZES)
         if size is None or increased_size is None:
             continue
-        modify_file(sym_tab_offset + sym_size * i + value_offset,(sym+increased_size).to_bytes(8,'little'))
+        modify_file(SYM_TAB_OFFSET + SYM_TAB_ENTRY_SIZE * i + SYM_TAB_VALUE_STRUCT_OFFSET,(sym_value+increased_size).to_bytes(8,'little'))
 
 def edit_dynamic_section():
     print("-------EDITING DYNAMIC SECTION--------")
-    dynamic_section_entry_size = 16
-    dynamic_section_offset = ELF.get_section_by_name(".dynamic")['sh_offset']
-    dynamic_section = ELF.get_section_by_name(".dynamic")
-    value_offset = 8
     indices = get_indices_of_sections()
-    for i in range(dynamic_section.num_tags()):
-        tag = dynamic_section._get_tag(i)
+    for i in range(DYNAMIC_SECTION.num_tags()):
+        tag = DYNAMIC_SECTION._get_tag(i)
         tag_value = tag['d_ptr']
         d_tag = tag['d_tag']
         #print(tag)
@@ -214,7 +203,7 @@ def edit_dynamic_section():
             virtual_offset = get_section_index_of_virtual_offset(tag_value)
             new_value = get_total_increased_offset(indices,virtual_offset,ELF_SECTIONS_ALIGNMENT_SIZES) + tag_value
         
-        modify_file(dynamic_section_offset + dynamic_section_entry_size * i + value_offset,(new_value).to_bytes(8,'little'))
+        modify_file(DYNAMIC_SECTION_OFFSET + DYNAMIC_SECTION_ENTRY_SIZE * i + DYNAMIC_SECTION_VALUE_STRUCT_OFFSET,(new_value).to_bytes(8,'little'))
 
 def get_section_index_of_offset(offset):
     for i in range(ELF.num_sections()):
@@ -232,35 +221,27 @@ def get_section_index_of_virtual_offset(offset):
     return None
 
 def edit_rela_dyn_section():
-    rela_dyn_section = ELF.get_section_by_name(".rela.dyn")
-    rela_dyn_section_offset = ELF.get_section_by_name(".rela.dyn")['sh_offset']
-    rela_dyn_relo_size = 24
-    rela_dyn_num_relocations = rela_dyn_section.num_relocations()
-    relative_type = 8
-    rela_dyn_entry_offset = rela_dyn_section['sh_offset']
-    rela_dyn_entry_size = rela_dyn_section['sh_entsize']
-    got_sec_index = ELF.get_section_index('.data')
-    addend_offset = 16
-    indices = get_indices_of_sections()
-    #increased_size = get_increased_size_after_section(indices,0,elf_sections_alignment_sizes,got_sec_index)
-    for i in range(rela_dyn_num_relocations):
-        #section_index = elf_object.get_section_index('.data')
 
-        rela_dyn_relocation_offset = rela_dyn_section.get_relocation(i)['r_offset']
+    indices = get_indices_of_sections()
+    relocation_offset = RELA_DYN_SECTION_OFFSET
+    for i in range(RELA_DYN_NUM_RELOCATIONS):
+
+
+        rela_dyn_relocation_offset = RELA_DYN_SECTION.get_relocation(i)['r_offset']
         section_index = get_section_index_of_virtual_offset(rela_dyn_relocation_offset)
-        #print("RELA DYN OFFSET:",hex(rela_dyn_relocation_offset),"SECTION INDEX OF RELA DYN ENTRY:",section_index)
+
         increased_size = get_increased_size_after_section(indices,0,ELF_SECTIONS_ALIGNMENT_SIZES,section_index)
-        modify_file(rela_dyn_entry_offset,(rela_dyn_relocation_offset + increased_size).to_bytes(8,'little'))
-        rela_dyn_entry_offset = rela_dyn_entry_offset + rela_dyn_entry_size
-        if rela_dyn_section.get_relocation(i)['r_info'] != relative_type:
+        modify_file(relocation_offset,(rela_dyn_relocation_offset + increased_size).to_bytes(8,'little'))
+        relocation_offset = relocation_offset + RELA_DYN_ENTRY_SIZE
+        if RELA_DYN_SECTION.get_relocation(i)['r_info'] != RELATIVE_TYPE:
             continue
-        print(rela_dyn_section.get_relocation(i))
-        relocation_addend = rela_dyn_section.get_relocation(i)['r_addend']
+        
+        print(RELA_DYN_SECTION.get_relocation(i))
+        relocation_addend = RELA_DYN_SECTION.get_relocation(i)['r_addend']
         section_index = get_section_index_of_virtual_offset(relocation_addend)
         new_offset = get_increased_size_after_section(indices,0,ELF_SECTIONS_ALIGNMENT_SIZES,section_index)+relocation_addend
-        #new_offset = calculate_new_offset_of_constant_section(rela_dyn_section.get_relocation(i)['r_addend'],elf_object,elf_sections_changes,sizes)+rela_dyn_section.get_relocation(i)['r_addend']
-        #size = get_total_increased_offset(inject_offsets,rela_dyn_offset,sizes)
-        modify_file(rela_dyn_section_offset + i * rela_dyn_relo_size + addend_offset,(new_offset).to_bytes(8,'little'))
+
+        modify_file(RELA_DYN_SECTION_OFFSET + i * RELA_DYN_ENTRY_SIZE + RELA_DYN_ADDEND_STRUCT_OFFSET,(new_offset).to_bytes(8,'little'))
         
 
 def offset_in_rela(offset):
@@ -642,6 +623,20 @@ PROGRAM_HEADER_ENTRY_SIZE = ELF['e_phentsize']
 
 SECTION_FILE_OFFSET_STRUCT_OFFSET = 32
 
+
+DYNAMIC_SECTION = ELF.get_section_by_name(".dynamic")
+DYNAMIC_SECTION_ENTRY_SIZE = DYNAMIC_SECTION['sh_entsize']
+DYNAMIC_SECTION_OFFSET = DYNAMIC_SECTION['sh_offset']
+DYNAMIC_SECTION_VALUE_STRUCT_OFFSET = 8
+
+RELA_DYN_SECTION = ELF.get_section_by_name(".rela.dyn")
+RELA_DYN_SECTION_OFFSET = RELA_DYN_SECTION['sh_offset']
+RELA_DYN_ENTRY_SIZE = RELA_DYN_SECTION['sh_entsize']
+RELA_DYN_NUM_RELOCATIONS = RELA_DYN_SECTION.num_relocations()
+RELATIVE_TYPE = 8
+RELA_DYN_ADDEND_STRUCT_OFFSET = 16
+
+
 #.plt.sec
 section = ELF.get_section_by_name(".plt.sec")
 PLT_SEC_INJECT_OFFSET = section['sh_offset'] + section['sh_size']
@@ -675,11 +670,14 @@ GNU_VERSION_R_INJECT_OFFSET = section['sh_offset'] + GNU_VERSION_R_HEADER_SIZE
 GNU_VERSION_R_INJECT_SIZE = 16 * len(GLIBC_versions)
 NUM_VERSIONS = section.num_versions()
 #.symtab
-section = ELF.get_section_by_name(".symtab")
+SYM_TAB_SECTION = ELF.get_section_by_name(".symtab")
+SYM_TAB_VALUE_STRUCT_OFFSET = 8
+NUM_SYMBOLS = SYM_TAB_SECTION.num_symbols()
+SYM_TAB_ENTRY_SIZE = 24
 if section is not None:
-    SYM_TAB_INJECT_OFFSET = section['sh_offset'] + section['sh_size'] #where the end of symble table is
-    SYM_TAB_INJECT_SIZE = len(symbol_names) * section['sh_entsize'] #size of functions of add
-    SYM_TAB_OFFSET = section['sh_offset']
+    SYM_TAB_INJECT_OFFSET = SYM_TAB_SECTION['sh_offset'] + SYM_TAB_SECTION['sh_size'] #where the end of symble table is
+    SYM_TAB_INJECT_SIZE = len(symbol_names) * SYM_TAB_SECTION['sh_entsize'] #size of functions of add
+    SYM_TAB_OFFSET = SYM_TAB_SECTION['sh_offset']
 #.rela.plt
 section = ELF.get_section_by_name(".rela.plt")
 RELA_PLT_INJECT_OFFSET = section['sh_offset'] + section['sh_size']
