@@ -245,18 +245,11 @@ def edit_rela_dyn_section():
         
 
 def offset_in_rela(offset):
-    rela_dyn_section = ELF.get_section_by_name(".rela.dyn")
-    rela_dyn_num_relocations = rela_dyn_section.num_relocations()
-    relative_type = 8
-
-    rela_plt_section = ELF.get_section_by_name(".rela.plt")
-    rela_plt_num_relocations = rela_plt_section.num_relocations()
-
-    for i in range(rela_dyn_num_relocations):
-        if offset == rela_dyn_section.get_relocation(i)['r_offset'] and rela_dyn_section.get_relocation(i)['r_info'] != relative_type:
+    for i in range(RELA_DYN_NUM_RELOCATIONS):
+        if offset == RELA_DYN_SECTION.get_relocation(i)['r_offset'] and RELA_DYN_SECTION.get_relocation(i)['r_info'] != RELATIVE_TYPE:
             return True
-    for i in range(rela_plt_num_relocations):
-        if offset == rela_plt_section.get_relocation(i)['r_offset']:
+    for i in range(RELA_PLT_NUM_RELOCATIONS):
+        if offset == RELA_PLT_SECTION.get_relocation(i)['r_offset']:
             return True
     return False
 
@@ -337,40 +330,35 @@ def align_section(offset,num_bytes):
     add_contents_to_file(offset,bytes_to_add,sizes)
 
 def add_functions_to_sym_tab():
-    section = ELF.get_section_by_name(".symtab")
-    offset = section['sh_offset'] + section['sh_size']
+
     sizes = [4,1,1,2,8,8]
+    inject_offset = SYM_TAB_INJECT_OFFSET
     assert sum(sizes) * len(symbol_names) == SYM_TAB_INJECT_SIZE, "values are not equal"
     for i in range(len(symbol_names)):
         name = 0x0
-        #print(hex(offset))
-        add_contents_to_file(offset,[name,0x12,0x0,0x0,0x0,0x0],sizes)
-        offset+= section['sh_entsize']
+        add_contents_to_file(inject_offset,[name,0x12,0x0,0x0,0x0,0x0],sizes)
+        inject_offset+= SYM_TAB_ENTRY_SIZE
     num_bytes_to_align = SYM_TAB_ALIGNMENT_SIZE - SYM_TAB_INJECT_SIZE
     if num_bytes_to_align > 0:
-        align_section(offset,num_bytes_to_align)
+        align_section(inject_offset,num_bytes_to_align)
 
 
 def check_duplicate_symbols_and_versions():
     ## Versions
-
-    gnu_version_r_section = ELF.get_section_by_name(".gnu.version_r")
-    print(gnu_version_r_section.get_version(2)[1].entry)
-    if gnu_version_r_section.get_version(2) is not None:
-        GLIBC_versions.remove(gnu_version_r_section.get_version(2)[1].name)
-        string_names.remove(gnu_version_r_section.get_version(2)[1].name)
-    if gnu_version_r_section.get_version(3) is not None:
-        GLIBC_versions.remove(gnu_version_r_section.get_version(3)[1].name)
-        string_names.remove(gnu_version_r_section.get_version(3)[1].name)
+    print(GNU_VERSION_R_SECTION.get_version(2)[1].entry)
+    if GNU_VERSION_R_SECTION.get_version(2) is not None:
+        GLIBC_versions.remove(GNU_VERSION_R_SECTION.get_version(2)[1].name)
+        string_names.remove(GNU_VERSION_R_SECTION.get_version(2)[1].name)
+    if GNU_VERSION_R_SECTION.get_version(3) is not None:
+        GLIBC_versions.remove(GNU_VERSION_R_SECTION.get_version(3)[1].name)
+        string_names.remove(GNU_VERSION_R_SECTION.get_version(3)[1].name)
 
     ## Symbols
-    dyn_sym_tab = ELF.get_section_by_name(".dynsym")
-    num_symbols = dyn_sym_tab.num_symbols()
-    for i in range(num_symbols):
-        if dyn_sym_tab.get_symbol(i).name in symbol_names:
-            del sym_versions[(symbol_names.index(dyn_sym_tab.get_symbol(i).name))]
-            symbol_names.remove(dyn_sym_tab.get_symbol(i).name)
-            string_names.remove(dyn_sym_tab.get_symbol(i).name)
+    for i in range(DYN_SYM_NUM_SYMBOLS):
+        if DYN_SYM_SECTION.get_symbol(i).name in symbol_names:
+            del sym_versions[(symbol_names.index(DYN_SYM_SECTION.get_symbol(i).name))]
+            symbol_names.remove(DYN_SYM_SECTION.get_symbol(i).name)
+            string_names.remove(DYN_SYM_SECTION.get_symbol(i).name)
 
 def add_functions_to_dyn_sym():
 
@@ -403,7 +391,6 @@ def calculate_got_virtual_address_change():
 
 
 def add_functions_to_rela_plt(got_virtual_address_change):
-    section = ELF.get_section_by_name(".rela.plt")
 
     print("GOT address change:",got_virtual_address_change)
     got_new_offset = calculate_new_offset(GOT_INJECT_OFFSET,'.got',ELF_SECTIONS_ALIGNMENT_SIZES)
@@ -417,7 +404,7 @@ def add_functions_to_rela_plt(got_virtual_address_change):
         add_contents_to_file(inject_offset,[rela_offset,info,0x0],sizes)
         #print('added')
         got_new_offset = got_new_offset + GOT_ENTRY_SIZE
-        inject_offset+= section['sh_entsize']
+        inject_offset+= RELA_PLT_ENTRY_SIZE
     
     num_bytes_to_align = RELA_PLT_ALIGNMENT_SIZE - RELA_PLT_INJECT_SIZE
     if num_bytes_to_align > 0:
@@ -452,13 +439,9 @@ def add_versions_to_gnu_version_r():
         align_section(GNU_VERSION_R_INJECT_OFFSET + verneed_size* (NUM_VERSIONS+len(GLIBC_versions)),num_bytes_to_align)
 
 def edit_gnu_version_r_section():
-    gnu_version_r_section = ELF.get_section_by_name(".gnu.version_r")
-    num_versions = gnu_version_r_section.num_versions()
-    #print("Num versions", num_versions)
-    additional_versions = 1
+    additional_versions = len(GLIBC_versions)
     cnt_offset = 2
-
-    modify_file(GNU_VERSION_R_OFFSET+cnt_offset,(num_versions+additional_versions).to_bytes(2,'little'))
+    modify_file(GNU_VERSION_R_OFFSET+cnt_offset,(NUM_VERSIONS+additional_versions).to_bytes(2,'little'))
 
 
 DYN_SYM_SYMBOL_NAMES = []
@@ -546,18 +529,16 @@ def get_increased_size_after_section(indices,index,sizes,end_index):
 
 def edit_rela_plt_section():
     rela_plt_index = ELF.get_section_index('.rela.plt')
-    rela_plt_section = ELF.get_section_by_name(".rela.plt")
-    rela_plt_entry_size = rela_plt_section['sh_entsize']
-    rela_plt_entry_offset = rela_plt_section['sh_offset']
+    rela_plt_relocation_entry_offset = RELA_PLT_OFFSET
     got_sec_index = ELF.get_section_index('.got')
     indices = get_indices_of_sections()
     increased_size = get_increased_size_after_section(indices,rela_plt_index,ELF_SECTIONS_ALIGNMENT_SIZES,got_sec_index)
     print("SIZE DIFF RELA PLT:",increased_size)
-    for i in range(rela_plt_section.num_relocations()):
-        relocation_offset = rela_plt_section.get_relocation(i)['r_offset']
+    for i in range(RELA_PLT_NUM_RELOCATIONS):
+        relocation_offset = RELA_PLT_SECTION.get_relocation(i)['r_offset']
         print("RELOCATION OFFSET",hex(relocation_offset))
-        modify_file(rela_plt_entry_offset,(relocation_offset + increased_size).to_bytes(8,'little'))
-        rela_plt_entry_offset = rela_plt_entry_offset + rela_plt_entry_size
+        modify_file(rela_plt_relocation_entry_offset,(relocation_offset + increased_size).to_bytes(8,'little'))
+        rela_plt_relocation_entry_offset = rela_plt_relocation_entry_offset + RELA_PLT_ENTRY_SIZE
 
 
 
@@ -570,12 +551,10 @@ def calculate_new_offset_of_constant_section(offset,elf_sections_changes,ELF_SEC
     return get_total_increased_offset(indices,index,ELF_SECTIONS_ALIGNMENT_SIZES)
 
 def edit_entry_point():
-    entry_point = ELF['e_entry']
-    entry_point_offset = 24
-    print("ENTRY POINT:",hex(entry_point))
-    new_offset = calculate_new_offset_of_constant_section(entry_point,ELF_SECTIONS_CHANGES,ELF_SECTIONS_ALIGNMENT_SIZES)+entry_point
+    print("ENTRY POINT:",hex(ENTRY_POINT))
+    new_offset = calculate_new_offset_of_constant_section(ENTRY_POINT,ELF_SECTIONS_CHANGES,ELF_SECTIONS_ALIGNMENT_SIZES)+ENTRY_POINT
     print("NEW ENTRY POINT:",hex(new_offset))
-    modify_file(entry_point_offset,(new_offset).to_bytes(8,'little'))
+    modify_file(ENTRY_POINT_STRUCT_OFFSET,(new_offset).to_bytes(8,'little'))
 
 
 FILE_NAME = 'hello'
@@ -602,7 +581,9 @@ def align_offsets():
 
 
 
-
+GNU_VERSION_R_SECTION = ELF.get_section_by_name(".gnu.version_r")
+DYN_SYM_SECTION = ELF.get_section_by_name(".dynsym")
+DYN_SYM_NUM_SYMBOLS = DYN_SYM_SECTION.num_symbols()
 check_duplicate_symbols_and_versions()
 convert_functions_to_str_tab_entry()
 
@@ -628,6 +609,10 @@ DYNAMIC_SECTION = ELF.get_section_by_name(".dynamic")
 DYNAMIC_SECTION_ENTRY_SIZE = DYNAMIC_SECTION['sh_entsize']
 DYNAMIC_SECTION_OFFSET = DYNAMIC_SECTION['sh_offset']
 DYNAMIC_SECTION_VALUE_STRUCT_OFFSET = 8
+
+ENTRY_POINT = ELF['e_entry']
+ENTRY_POINT_STRUCT_OFFSET = 24
+
 
 RELA_DYN_SECTION = ELF.get_section_by_name(".rela.dyn")
 RELA_DYN_SECTION_OFFSET = RELA_DYN_SECTION['sh_offset']
@@ -664,11 +649,10 @@ GNU_VERSION_INJECT_OFFSET = section['sh_offset'] + section['sh_size']
 GNU_VERSION_ENTRY_SIZE = section['sh_entsize']
 GNU_VERSION_INJECT_SIZE = len(sym_versions) * GNU_VERSION_ENTRY_SIZE
 #.gnu.version_r
-section = ELF.get_section_by_name(".gnu.version_r")
 GNU_VERSION_R_HEADER_SIZE = 16
-GNU_VERSION_R_INJECT_OFFSET = section['sh_offset'] + GNU_VERSION_R_HEADER_SIZE
+GNU_VERSION_R_INJECT_OFFSET = GNU_VERSION_R_SECTION['sh_offset'] + GNU_VERSION_R_HEADER_SIZE
 GNU_VERSION_R_INJECT_SIZE = 16 * len(GLIBC_versions)
-NUM_VERSIONS = section.num_versions()
+NUM_VERSIONS = GNU_VERSION_R_SECTION.num_versions()
 #.symtab
 SYM_TAB_SECTION = ELF.get_section_by_name(".symtab")
 SYM_TAB_VALUE_STRUCT_OFFSET = 8
@@ -678,17 +662,19 @@ if section is not None:
     SYM_TAB_INJECT_OFFSET = SYM_TAB_SECTION['sh_offset'] + SYM_TAB_SECTION['sh_size'] #where the end of symble table is
     SYM_TAB_INJECT_SIZE = len(symbol_names) * SYM_TAB_SECTION['sh_entsize'] #size of functions of add
     SYM_TAB_OFFSET = SYM_TAB_SECTION['sh_offset']
+    SYM_TAB_ENTRY_SIZE = SYM_TAB_SECTION['sh_entsize']
 #.rela.plt
-section = ELF.get_section_by_name(".rela.plt")
-RELA_PLT_INJECT_OFFSET = section['sh_offset'] + section['sh_size']
-RELA_PLT_INJECT_SIZE = len(symbol_names) * section['sh_entsize']
+RELA_PLT_SECTION = ELF.get_section_by_name(".rela.plt")
+RELA_PLT_INJECT_OFFSET = RELA_PLT_SECTION['sh_offset'] + RELA_PLT_SECTION['sh_size']
+RELA_PLT_ENTRY_SIZE = RELA_PLT_SECTION['sh_entsize']
+RELA_PLT_INJECT_SIZE = len(symbol_names) * RELA_PLT_ENTRY_SIZE
+RELA_PLT_NUM_RELOCATIONS = RELA_PLT_SECTION.num_relocations()
 #.dynsym
-section = ELF.get_section_by_name(".dynsym")
-DYN_SYM_INJECT_OFFSET = section['sh_offset'] + section['sh_size']
-DYN_SYM_ENTRY_SIZE = section['sh_entsize']
+DYN_SYM_INJECT_OFFSET = DYN_SYM_SECTION['sh_offset'] + DYN_SYM_SECTION['sh_size']
+DYN_SYM_ENTRY_SIZE = DYN_SYM_SECTION['sh_entsize']
 DYN_SYM_INJECT_SIZE = len(symbol_names) * DYN_SYM_ENTRY_SIZE
-for i in range(section.num_symbols()):
-    DYN_SYM_SYMBOL_NAMES.append(section.get_symbol(i).name)
+for i in range(DYN_SYM_SECTION.num_symbols()):
+    DYN_SYM_SYMBOL_NAMES.append(DYN_SYM_SECTION.get_symbol(i).name)
 #.dynstr
 section = ELF.get_section_by_name(".dynstr")
 DYN_STR_INJECT_OFFSET = section['sh_offset'] + section['sh_size']
