@@ -136,7 +136,7 @@ def edit_symbol_table():
 
 # Edits certain dynamic section tags
 def edit_dynamic_section():
-    print("-------EDITING DYNAMIC SECTION--------")
+    #print("-------EDITING DYNAMIC SECTION--------")
     for i in range(DYNAMIC_SECTION.num_tags()):
         tag = DYNAMIC_SECTION._get_tag(i)
         tag_value = tag['d_ptr']
@@ -223,7 +223,7 @@ def edit_program_header():
         modify_file(segment_offset + PROGRAM_HEADER_MEMSZ_STRUCT_OFFSET,(segment['p_memsz']+seg_inject_size).to_bytes(8,'little'))
 
         increased_offset = get_total_increased_offset(SECTIONS_OFFSETS,segment['p_offset'],ELF_SECTIONS_ALIGNMENT_SIZES)
-        print("SEGMENT INCREASED OFFSET:",increased_offset)
+        #print("SEGMENT INCREASED OFFSET:",increased_offset)
         modify_file(segment_offset + PROGRAM_HEADER_FILE_OFFSET_STRUCT_OFFSET,(segment['p_offset']+increased_offset).to_bytes(8,'little'))
         modify_file(segment_offset + PROGRAM_HEADER_VIRTUAL_ADDRESS_STRUCT_OFFSET,(segment['p_vaddr']+increased_offset).to_bytes(8,'little'))
         modify_file(segment_offset + PROGRAM_HEADER_PHYSICAL_ADDRESS_STRUCT_OFFSET,(segment['p_paddr']+increased_offset).to_bytes(8,'little'))
@@ -519,25 +519,43 @@ def edit_text_section(inject_offset,size):
             modify_file(program_header_offset + i * header_size + memsz_offset,(segment['p_memsz']+size).to_bytes(8,'little'))
 
 
-def edit_code_section(section_offset,section_size,inject_offset,size):
+def edit_code_section(section_offset,section_size):
+    inject_offset = 0x0
+    size = 0x0
+
     start = section_offset
     end = section_offset + section_size
-
+    section_index = get_section_index_of_offset(start)
+    new_section_offset = calc_new_offset(start,section_index)
+    print("Start of section: ",hex(new_section_offset))
     FILE.seek(start)  # Move the file pointer to the starting offset
     code = FILE.read(end - start)
     decoder = Decoder(64, code, ip=start)
     formatter = Formatter(FormatterSyntax.NASM)
     for instr in decoder:
+        #print(instr)
         disasm = formatter.format(instr)
+
         rel_mem = instr.ip_rel_memory_address
         next_ip = instr.ip + instr.len
 
         operand = rel_mem - next_ip
         instruction_length = instr.len
         start_index = instr.ip
+        if not instr.is_ip_rel_memory_operand:
+            continue
+        #print(hex(instr.ip),instr,hex(rel_mem))
         end_index = start_index + instruction_length
         instruction_bytes = code[start_index-start:end_index-start]
-        if ((instr.ip < inject_offset < rel_mem) or (rel_mem < inject_offset < instr.ip)) and rel_mem < os.path.getsize(FILE_NAME) and not offset_in_rela(rel_mem):
+
+        section_index_rel_mem = get_section_index_of_virtual_offset(rel_mem)
+        section_index_rip = get_section_index_of_virtual_offset(instr.ip)
+        #increased distance between current location and rel mem
+        increased_size = (calc_new_offset(rel_mem,section_index_rel_mem) - rel_mem) - (calc_new_offset(instr.ip,section_index_rip) - instr.ip)
+        #print(hex(calc_new_offset(instr.ip,section_index_rip)-instr.ip))
+        #print(section_index_rel_mem,section_index_rip)
+        print(hex(instr.ip),'INCREASED SIZE',hex(increased_size))
+        if True or not offset_in_rela(rel_mem):
             searching_bytes = operand.to_bytes(4, byteorder='little',signed=True)
             hex_code = ' '.join(f'{byte:02X}' for byte in instruction_bytes)
             hex_bytes = bytes.fromhex(hex_code)
@@ -545,20 +563,20 @@ def edit_code_section(section_offset,section_size,inject_offset,size):
                 instruction_offset = instr.ip + hex_bytes.index(searching_bytes)
             except:
                 continue
-            modify_file(instruction_offset,(rel_mem - next_ip + size if instr.ip < inject_offset < rel_mem else rel_mem - next_ip - size).to_bytes(4,'little',signed=True))
+            #print(hex(instruction_offset))
+            #modify_file(instruction_offset,(rel_mem - next_ip + increased_size).to_bytes(4,'little',signed=True))
+            modify_file(instruction_offset,(rel_mem - next_ip + increased_size if instr.ip < rel_mem else rel_mem - next_ip - increased_size).to_bytes(4,'little',signed=True))
             #print(hex(instr.ip),"|",disasm,hex(rel_mem),"|"," Next instruction: ",hex(next_ip),"|"," Operand ",hex(rel_mem - next_ip)," | Memory offset",hex(instruction_offset)," | Hex Code: ",hex_code)
 
-def edit_text_section_calls(text_offset,ELF_SECTIONS_ALIGNMENT_SIZES):
+def edit_text_section_calls():
     
-    for i in range(ELF.num_segments()):
+    for i in range(NUM_SEGMENTS):
         if ELF.get_segment(i)['p_flags'] & 0x1 == 1:
             offset = ELF.get_segment(i)['p_offset']
             end = offset + ELF.get_segment(i)['p_filesz']
-            for i in range(ELF.num_sections()):
+            for i in range(NUM_SECTIONS):
                 if ELF.get_section(i)['sh_offset'] >= offset and ELF.get_section(i)['sh_offset'] < end:
-                    inject_offset = 0x0
-                    size = 0x0
-                    edit_code_section(ELF.get_section(i)['sh_offset'],ELF.get_section(i)['sh_size'],inject_offset,size)
+                    edit_code_section(ELF.get_section(i)['sh_offset'],ELF.get_section(i)['sh_size'])
 
 
 ## START
@@ -703,20 +721,26 @@ print("ALIGNMENT SIZES",ELF_SECTIONS_ALIGNMENT_SIZES)
 print("SECTION OFFSETS",SECTIONS_OFFSETS)
 print("INJECT OFFSETS",INJECT_OFFSETS)
 
+# Modifications
+
 edit_entry_point()
 edit_symbol_table()
 edit_dynamic_section()
 edit_rela_dyn_section()
 edit_rela_plt_section()
-edit_program_header()
 edit_gnu_version_r_section()
 
+edit_text_section_calls()
+
+edit_program_header()
 edit_elf_sections()
 edit_sections_changes_sizes()
 
 modify_file(40,(ELF['e_shoff']+sum(ELF_SECTIONS_ALIGNMENT_SIZES)).to_bytes(8,'little'))
 
 print("Num symbols to add ",len(symbol_names))
+
+# Injections
 
 add_functions_to_sym_tab()
 add_functions_to_got()
