@@ -542,7 +542,10 @@ def edit_code_section(section_offset,section_size):
         operand = rel_mem - next_ip
         instruction_length = instr.len
         start_index = instr.ip
-        if not instr.is_ip_rel_memory_operand:
+        if instr.is_call_near:
+            rel_mem = instr.memory_displacement
+            print(hex(instr.ip),hex(instr.memory_displacement))
+        if not (instr.is_ip_rel_memory_operand or instr.is_call_near):
             continue
         #print(hex(instr.ip),instr,hex(rel_mem))
         end_index = start_index + instruction_length
@@ -552,9 +555,10 @@ def edit_code_section(section_offset,section_size):
         section_index_rip = get_section_index_of_virtual_offset(instr.ip)
         #increased distance between current location and rel mem
         increased_size = (calc_new_offset(rel_mem,section_index_rel_mem) - rel_mem) - (calc_new_offset(instr.ip,section_index_rip) - instr.ip)
-        #print(hex(calc_new_offset(instr.ip,section_index_rip)-instr.ip))
-        #print(section_index_rel_mem,section_index_rip)
-        print(hex(instr.ip),'INCREASED SIZE',hex(increased_size))
+        #print(hex(instr.ip),instr,'INCREASED SIZE',hex(increased_size))
+        if instr.is_call_near:
+            print(hex(instr.ip),instr,'INCREASED SIZE',hex(increased_size))
+        
         if True or not offset_in_rela(rel_mem):
             searching_bytes = operand.to_bytes(4, byteorder='little',signed=True)
             hex_code = ' '.join(f'{byte:02X}' for byte in instruction_bytes)
@@ -565,7 +569,7 @@ def edit_code_section(section_offset,section_size):
                 continue
             #print(hex(instruction_offset))
             #modify_file(instruction_offset,(rel_mem - next_ip + increased_size).to_bytes(4,'little',signed=True))
-            modify_file(instruction_offset,(rel_mem - next_ip + increased_size if instr.ip < rel_mem else rel_mem - next_ip - increased_size).to_bytes(4,'little',signed=True))
+            modify_file(instruction_offset,(rel_mem - next_ip + increased_size if instr.ip < rel_mem else rel_mem - next_ip + increased_size).to_bytes(4,'little',signed=True))
             #print(hex(instr.ip),"|",disasm,hex(rel_mem),"|"," Next instruction: ",hex(next_ip),"|"," Operand ",hex(rel_mem - next_ip)," | Memory offset",hex(instruction_offset)," | Hex Code: ",hex_code)
 
 def edit_text_section_calls():
