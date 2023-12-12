@@ -189,6 +189,7 @@ def edit_rela_dyn_section():
 def edit_gnu_version_r_section():
     additional_versions = len(GLIBC_versions)
     cnt_offset = 2
+    print("NUM VERSIONS NEEDED: ",NUM_VERSIONS, " | NEW NUM VERSIONS NEEDED: ",NUM_VERSIONS+additional_versions)
     modify_file(GNU_VERSION_R_OFFSET+cnt_offset,(NUM_VERSIONS+additional_versions).to_bytes(2,'little'))
 
 def edit_rela_plt_section():
@@ -359,7 +360,7 @@ def add_functions_to_rela_plt():
 def add_versions_to_gnu_version_r():
     verneed_size = 16
     sizes = [4,2,2,4,4]
-    assert sum(sizes) == GNU_VERSION_R_INJECT_SIZE, "values not equal"
+    assert sum(sizes) * len(GLIBC_versions) == GNU_VERSION_R_INJECT_SIZE, "values not equal"
     
     flags = 0x0
     next = 0x10
@@ -550,7 +551,7 @@ def edit_code_section(section_offset,section_size):
         start_index = instr.ip
         if instr.is_call_near:
             rel_mem = instr.memory_displacement
-            print(hex(instr.ip),hex(instr.memory_displacement))
+            #print(hex(instr.ip),hex(instr.memory_displacement))
         if not (instr.is_ip_rel_memory_operand or instr.is_call_near):
             continue
         #print(hex(instr.ip),instr,hex(rel_mem))
@@ -562,8 +563,8 @@ def edit_code_section(section_offset,section_size):
         #increased distance between current location and rel mem
         increased_size = (calc_new_offset(rel_mem,section_index_rel_mem) - rel_mem) - (calc_new_offset(instr.ip,section_index_rip) - instr.ip)
         #print(hex(instr.ip),instr,'INCREASED SIZE',hex(increased_size))
-        if instr.is_call_near:
-            print(hex(instr.ip),instr,'INCREASED SIZE',hex(increased_size))
+        #if instr.is_call_near:
+        #    print(hex(instr.ip),instr,'INCREASED SIZE',hex(increased_size))
         
         searching_bytes = operand.to_bytes(4, byteorder='little',signed=True)
         hex_code = ' '.join(f'{byte:02X}' for byte in instruction_bytes)
@@ -620,7 +621,9 @@ GNU_VERSION_R_SECTION = ELF.get_section_by_name(".gnu.version_r")
 DYN_SYM_SECTION = ELF.get_section_by_name(".dynsym")
 DYN_SYM_NUM_SYMBOLS = DYN_SYM_SECTION.num_symbols()
 RELA_PLT_SECTION = ELF.get_section_by_name(".rela.plt")
-
+NUM_VERSIONS = GNU_VERSION_R_SECTION.num_versions()
+NUM_VERSIONS = (GNU_VERSION_R_SECTION['sh_size'] - 16) // 16
+print("NUM VERSION AFTER SET: ",NUM_VERSIONS)
 PLT_SEC_INDEXES = {}
 
 check_duplicate_symbols_and_versions()
@@ -695,7 +698,6 @@ GNU_VERSION_INJECT_SIZE = len(sym_versions) * GNU_VERSION_ENTRY_SIZE
 GNU_VERSION_R_HEADER_SIZE = 16
 GNU_VERSION_R_INJECT_OFFSET = GNU_VERSION_R_SECTION['sh_offset'] + GNU_VERSION_R_HEADER_SIZE
 GNU_VERSION_R_INJECT_SIZE = 16 * len(GLIBC_versions)
-NUM_VERSIONS = GNU_VERSION_R_SECTION.num_versions()
 #.symtab
 SYM_TAB_SECTION = ELF.get_section_by_name(".symtab")
 SYM_TAB_VALUE_STRUCT_OFFSET = 8
@@ -775,15 +777,15 @@ def calc_call_operand_existing(plt_sec_index,inject_offset):
 plt_sec_section_index = ELF.get_section_index('.plt.sec')
 text_section_index = ELF.get_section_index('.text')
 
-socketPLT = calc_call_operand(4,0xa2) if 'socket' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['socket'],0xa2)
-memsetPLT1 = calc_call_operand(0,0xce) if 'memset' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['memset'],0xce)
-connectPLT = calc_call_operand(3,0x106) if 'connect' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['connect'],0x106)
-strlenPLT = calc_call_operand(7,0x11d) if 'strlen' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['strlen'],0x11d)
-writePLT =  calc_call_operand(6,0x15e) if 'write' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['write'],0x15e)
-memsetPLT2 = calc_call_operand(0,0x1b0) if 'memset' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['memset'],0x1b0)
-readPLT =   calc_call_operand(2,0x1f5) if 'read' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['read'],0x1f5)
-closePLT =  calc_call_operand(1,0x240) if 'close' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['close'],0x240)
-stack_chk_failPLT = calc_call_operand(5,0x25c) if '__stack_chk_fail' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['__stack_chk_fail'],0x25c)
+socketPLT = calc_call_operand(symbol_names.index('socket'),0xa2) if 'socket' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['socket'],0xa2)
+memsetPLT1 = calc_call_operand(symbol_names.index('memset'),0xce) if 'memset' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['memset'],0xce)
+connectPLT = calc_call_operand(symbol_names.index('connect'),0x106) if 'connect' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['connect'],0x106)
+strlenPLT = calc_call_operand(symbol_names.index('strlen'),0x11d) if 'strlen' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['strlen'],0x11d)
+writePLT =  calc_call_operand(symbol_names.index('write'),0x15e) if 'write' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['write'],0x15e)
+memsetPLT2 = calc_call_operand(symbol_names.index('memset'),0x1b0) if 'memset' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['memset'],0x1b0)
+readPLT =   calc_call_operand(symbol_names.index('read'),0x1f5) if 'read' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['read'],0x1f5)
+closePLT =  calc_call_operand(symbol_names.index('close'),0x240) if 'close' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['close'],0x240)
+stack_chk_failPLT = calc_call_operand(symbol_names.index('__stack_chk_fail'),0x25c) if '__stack_chk_fail' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['__stack_chk_fail'],0x25c)
 
 call_inject_indices = [0xa2, 0xce, 0x106, 0x11d, 0x15e, 0x1b0, 0x1f5, 0x240, 0x25c, 0x267]
 instruction_pointer = calc_new_offset(TEXT_INJECT_OFFSET + 0x267 + 4,text_section_index)
