@@ -67,13 +67,27 @@ def get_index_of_symbol_in_dyn_sym(symbol_name):
 # Determines if symbols and versions are already present in file
 def check_duplicate_symbols_and_versions():
     ## Versions
-    print(GNU_VERSION_R_SECTION.get_version(2)[1].entry)
-    if GNU_VERSION_R_SECTION.get_version(2) is not None:
-        GLIBC_versions.remove(GNU_VERSION_R_SECTION.get_version(2)[1].name)
-        string_names.remove(GNU_VERSION_R_SECTION.get_version(2)[1].name)
-    if GNU_VERSION_R_SECTION.get_version(3) is not None:
-        GLIBC_versions.remove(GNU_VERSION_R_SECTION.get_version(3)[1].name)
-        string_names.remove(GNU_VERSION_R_SECTION.get_version(3)[1].name)
+    print(GLIBC_versions)
+    print(GNU_VERSION_R_SECTION.num_versions())
+    for version, aux_iter in GNU_VERSION_R_SECTION.iter_versions():
+        print("Main Version:", version.entry)
+        if version.name == 'libc.so.6':
+            for aux_entry in aux_iter:
+                if aux_entry.name == 'GLIBC_2.2.5':
+                    GLIBC_versions.remove('GLIBC_2.2.5')
+                    string_names.remove('GLIBC_2.2.5')
+                    for x in range(len(sym_versions)):
+                        if sym_versions[x] == 2:
+                            sym_versions[x] = aux_entry['vna_other']
+                if aux_entry.name == 'GLIBC_2.4':
+                    GLIBC_versions.remove('GLIBC_2.4')
+                    string_names.remove('GLIBC_2.4')
+                    for x in range(len(sym_versions)):
+                        if sym_versions[x] == 3:
+                            sym_versions[x] = aux_entry['vna_other']
+    print(sym_versions)
+    #for i in range(GNU_VERSION_R_SECTION.num_versions()):
+    #   print(GNU_VERSION_R_SECTION.get_version(i).entry)
 
     ## Symbols
     for i in range(DYN_SYM_NUM_SYMBOLS):
@@ -613,7 +627,7 @@ def inject_code():
 
 ## START
 
-FILE_NAME = 'hello'
+FILE_NAME = 'vim'
 FILE = open(FILE_NAME,'r+b')
 ELF = ELFFile(open(FILE_NAME,'rb'))
 
@@ -701,9 +715,8 @@ GNU_VERSION_R_INJECT_SIZE = 16 * len(GLIBC_versions)
 #.symtab
 SYM_TAB_SECTION = ELF.get_section_by_name(".symtab")
 SYM_TAB_VALUE_STRUCT_OFFSET = 8
-NUM_SYMBOLS = SYM_TAB_SECTION.num_symbols()
-SYM_TAB_ENTRY_SIZE = 24
-if section is not None:
+if SYM_TAB_SECTION is not None:
+    NUM_SYMBOLS = SYM_TAB_SECTION.num_symbols()
     SYM_TAB_INJECT_OFFSET = SYM_TAB_SECTION['sh_offset'] + SYM_TAB_SECTION['sh_size'] #where the end of symble table is
     SYM_TAB_INJECT_SIZE = len(symbol_names) * SYM_TAB_SECTION['sh_entsize'] #size of functions of add
     SYM_TAB_OFFSET = SYM_TAB_SECTION['sh_offset']
