@@ -131,11 +131,14 @@ def edit_elf_section(elf_section,section_index,size):
 def edit_elf_sections():
     for i in range(NUM_SECTIONS):
         size = get_total_increased_offset(SECTION_INDICES,i,ELF_SECTIONS_ALIGNMENT_SIZES)
+        print("SECTION: ", ELF.get_section(i).name, "SIZE: ", size)
         edit_elf_section(ELF.get_section(i),i,size)
 
 # Changes all sizes of injected sections
 def edit_sections_changes_sizes():
     for i in range(len(ELF_SECTIONS_CHANGES)):
+        if SECTIONS_OFFSETS[i] == -1:
+            continue
         section_size = ELF.get_section_by_name(ELF_SECTIONS_CHANGES[i])['sh_size']
         total_section_size_offset = SECTION_HEADER_TABLE_OFFSET + SECTION_HEADER_TABLE_ENTRY_SIZE * ELF.get_section_index(ELF_SECTIONS_CHANGES[i]) + SECTION_FILE_OFFSET_STRUCT_OFFSET
         modify_file(total_section_size_offset,(section_size+ELF_SECTIONS_INJECT_SIZES[i]).to_bytes(8,'little'))
@@ -182,8 +185,8 @@ def edit_rela_dyn_section():
 
     relocation_offset = RELA_DYN_SECTION_OFFSET
     for i in range(RELA_DYN_NUM_RELOCATIONS):
-
         rela_dyn_relocation_offset = RELA_DYN_SECTION.get_relocation(i)['r_offset']
+        #print(RELA_DYN_SECTION.get_relocation(i))
         section_index = get_section_index_of_virtual_offset(rela_dyn_relocation_offset)
         new_offset = calc_new_offset(rela_dyn_relocation_offset,section_index)
         
@@ -195,6 +198,8 @@ def edit_rela_dyn_section():
         
         relocation_addend = RELA_DYN_SECTION.get_relocation(i)['r_addend']
         section_index = get_section_index_of_virtual_offset(relocation_addend)
+        if (section_index is None):
+            print(hex(RELA_DYN_SECTION.get_relocation(i)['r_addend']))
         new_offset = calc_new_offset(relocation_addend,section_index)
 
         modify_file(RELA_DYN_SECTION_OFFSET + i * RELA_DYN_ENTRY_SIZE + RELA_DYN_ADDEND_STRUCT_OFFSET,(new_offset).to_bytes(8,'little'))
@@ -204,7 +209,8 @@ def edit_gnu_version_r_section():
     additional_versions = len(GLIBC_versions)
     cnt_offset = 2
     print("NUM VERSIONS NEEDED: ",NUM_VERSIONS, " | NEW NUM VERSIONS NEEDED: ",NUM_VERSIONS+additional_versions)
-    modify_file(GNU_VERSION_R_OFFSET+cnt_offset,(NUM_VERSIONS+additional_versions).to_bytes(2,'little'))
+    # need to edit the right version for file libc.so.6
+    #modify_file(GNU_VERSION_R_OFFSET+cnt_offset,(NUM_VERSIONS+additional_versions).to_bytes(2,'little'))
 
 def edit_rela_plt_section():
 
@@ -248,7 +254,7 @@ def edit_program_header():
         modify_file(segment_offset + PROGRAM_HEADER_FILE_OFFSET_STRUCT_OFFSET,(segment['p_offset']+increased_offset).to_bytes(8,'little'))
         modify_file(segment_offset + PROGRAM_HEADER_VIRTUAL_ADDRESS_STRUCT_OFFSET,(segment['p_vaddr']+increased_offset).to_bytes(8,'little'))
         modify_file(segment_offset + PROGRAM_HEADER_PHYSICAL_ADDRESS_STRUCT_OFFSET,(segment['p_paddr']+increased_offset).to_bytes(8,'little'))
-
+    
 
 def add_functions_to_plt_sec():
     sizes = [4,3,4,5]
@@ -425,6 +431,8 @@ def add_functions_to_got():
 def get_total_increased_offset(indices,index,sizes):
     size = 0
     for j in range(len(indices)):
+        if indices[j] == -1:
+            continue
         if index > indices[j]:
             size+=sizes[j]
     return size
@@ -454,6 +462,10 @@ def get_section_index_of_virtual_offset(offset):
         segment = ELF.get_segment(i)
         if offset >= segment['p_vaddr'] and offset < (segment['p_vaddr'] + segment['p_memsz']):
             offset = offset - (segment['p_vaddr'] - segment['p_offset'])
+            while (get_section_index_of_offset(offset) is None):
+                offset = offset - 1
+                if offset < 0:
+                    return None
             return get_section_index_of_offset(offset)
     return None
 
@@ -461,6 +473,8 @@ def get_section_index_of_virtual_offset(offset):
 def calc_new_offset(old_offset,section_index):
     new_offset = old_offset
     for j in range(len(SECTION_INDICES)):
+        if (SECTION_INDICES[j] == -1):
+            continue
         if section_index > SECTION_INDICES[j]:
             new_offset+=ELF_SECTIONS_ALIGNMENT_SIZES[j]
     return new_offset
@@ -470,6 +484,9 @@ def calc_new_offset(old_offset,section_index):
 def get_indices_of_sections():
     indices = []
     for i in range(len(ELF_SECTIONS_CHANGES)):
+        if SECTIONS_OFFSETS[i] == -1:
+            indices.append(-1)
+            continue
         indices.append(ELF.get_section_index(ELF_SECTIONS_CHANGES[i]))
     return indices
 
@@ -486,6 +503,12 @@ def align_section(offset,num_bytes):
 def align_offsets():
     aligned_sizes = []
     for i in range(len(ELF_SECTIONS_CHANGES)):
+        if SECTIONS_OFFSETS[i] == -1:
+            aligned_sizes.append(0)
+            continue
+        if ELF_SECTIONS_INJECT_SIZES[i] % 16 == 0:
+            aligned_sizes.append(ELF_SECTIONS_INJECT_SIZES[i])
+            continue
         index = ELF.get_section_index(ELF_SECTIONS_CHANGES[i])
         next_section_index = index + 1
         #xxx4 xxxx8
@@ -627,9 +650,42 @@ def inject_code():
 
 ## START
 
-FILE_NAME = 'vim'
+FILE_NAME = 'hello'
 FILE = open(FILE_NAME,'r+b')
 ELF = ELFFile(open(FILE_NAME,'rb'))
+
+SYM_TAB_OFFSET = -1
+GOT_OFFSET = -1
+TEXT_OFFSET = -1 
+PLT_SEC_OFFSET = -1 
+PLT_OFFSET = -1
+RELA_PLT_OFFSET = -1
+GNU_VERSION_R_OFFSET = -1 
+GNU_VERSION_OFFSET = -1 
+DYN_STR_OFFSET = -1 
+DYN_SYM_OFFSET = -1
+
+SYM_TAB_INJECT_SIZE = -1
+GOT_INJECT_SIZE = -1 
+TEXT_INJECT_SIZE = -1 
+PLT_SEC_INJECT_SIZE = -1 
+PLT_INJECT_SIZE = -1 
+RELA_PLT_INJECT_SIZE = -1 
+GNU_VERSION_R_INJECT_SIZE = -1 
+GNU_VERSION_INJECT_SIZE = -1 
+DYN_STR_INJECT_SIZE = -1 
+DYN_SYM_INJECT_SIZE = -1
+
+SYM_TAB_INJECT_OFFSET = -1 
+GOT_INJECT_OFFSET = -1 
+TEXT_INJECT_OFFSET = -1 
+PLT_SEC_INJECT_OFFSET = -1 
+PLT_INJECT_OFFSET = -1 
+RELA_PLT_INJECT_OFFSET = -1
+GNU_VERSION_R_INJECT_OFFSET = -1
+GNU_VERSION_INJECT_OFFSET = -1
+DYN_STR_INJECT_OFFSET = -1
+DYN_SYM_INJECT_OFFSET = -1
 
 GNU_VERSION_R_SECTION = ELF.get_section_by_name(".gnu.version_r")
 DYN_SYM_SECTION = ELF.get_section_by_name(".dynsym")
@@ -774,6 +830,7 @@ print("SIZES",ELF_SECTIONS_INJECT_SIZES)
 print("ALIGNMENT SIZES",ELF_SECTIONS_ALIGNMENT_SIZES)
 print("SECTION OFFSETS",SECTIONS_OFFSETS)
 print("INJECT OFFSETS",INJECT_OFFSETS)
+print("SECTION INDICES",SECTION_INDICES)
 
 def calc_call_operand(plt_sec_index,inject_offset):
     size_of_call = 4
@@ -943,7 +1000,8 @@ inject = [
 # Modifications
 
 edit_entry_point()
-edit_symbol_table()
+if SYM_TAB_SECTION is not None: 
+    edit_symbol_table()
 edit_dynamic_section()
 edit_rela_dyn_section()
 edit_rela_plt_section()
@@ -961,7 +1019,8 @@ print("Num symbols to add ",len(symbol_names))
 
 # Injections
 
-add_functions_to_sym_tab()
+if SYM_TAB_SECTION is not None:
+    add_functions_to_sym_tab()
 add_functions_to_got()
 inject_code()
 add_functions_to_plt_sec()
