@@ -9,7 +9,7 @@ The virus contains a payload that sends a POST request (with an empty body) to m
 ## Installation
 
 1. Install virtual box https://www.virtualbox.org/wiki/Downloads
-2. Install VM [here](https://google.com)
+2. Install VM [here](https://jasonhschwartzman.com/code-injection)
 3. On virtual box select File -> Import Appliance, then select the download VM, select Next and then Finish.
 4. Open the VM
 5. Open the Terminal
