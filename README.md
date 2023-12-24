@@ -13,7 +13,9 @@ The virus contains a payload that sends a POST request (with an empty body) to m
 3. On virtual box select File -> Import Appliance, then select the download VM, select Next and then Finish.
 4. Open the VM
 5. Open the Terminal
-6. Type 'sudo su' followed by the password 'ubuntu'
-7. Type 'cd ELF-Code-Injection'
+```
+sudo su (followed by the password ubuntu)
+cd ELF-Code-Injection
+```
 
 Now that you are in the directory with virus, inject.py, feel free to add any ELF file to this directory for testing. When you want to run the virus and infect all ELF files in the current directory type 'python3 inject.py'
