@@ -13,6 +13,7 @@ The virus contains a payload that sends a POST request (with an empty body) to m
 3. On virtual box select File -> Import Appliance, then select the download VM, select Next and then Finish.
 4. Open the VM
 5. Open the Terminal
+6. Run the following:
 ```
 sudo su (followed by the password ubuntu)
 cd ELF-Code-Injection
