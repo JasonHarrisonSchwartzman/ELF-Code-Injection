@@ -1,6 +1,6 @@
 # ELF-Code-Injection
 
-This program injects a payload into all ELF files within the current directory.
+This program injects a payload into all ELF files within the same directory.
 
 ## Payload
 
