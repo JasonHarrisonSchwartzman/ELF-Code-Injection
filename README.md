@@ -19,4 +19,8 @@ sudo su (followed by the password ubuntu)
 cd ELF-Code-Injection
 ```
 
-Now that you are in the directory with virus, inject.py, feel free to add any ELF file to this directory for testing. When you want to run the virus and infect all ELF files in the current directory type 'python3 inject.py'
+Now that you are in the directory with virus, inject.py, feel free to add any ELF file to this directory for testing. When you want to run the virus and infect all ELF files in the current directory run:
+```
+python3 inject.py
+```
+Then check to see timestamps [here](https://jasonhschwartzman.com/projects/code-injection/timestamps).
